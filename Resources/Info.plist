@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>DailyOS</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.shashbhatia.DailyOS</string>
+	<key>CFBundleName</key>
+	<string>FirstFocus</string>
+	<key>CFBundleDisplayName</key>
+	<string>FirstFocus</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>LSUIElement</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/bhatiashash/FirstFocus/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>EOV3PcOeRWGbn7oSXlW/ZIG5pBg4DADsudTnT2Dksxk=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>FirstFocus reads your open reminders to rank them alongside your self-thread. Completing a Signal here completes the underlying reminder; nothing else is written back.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>FirstFocus resolves a Messages Signal's sender against your Contacts once, when the Signal is created, so it can show a name instead of a raw phone number or email. Nothing is written back to Contacts.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>FirstFocus sends your Morning Brief to your phone through Messages. It sends nothing else and reads nothing through Messages this way.</string>
+</dict>
+</plist>
