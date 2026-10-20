@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/AppIcon-source.png" width="128" alt="FirstFocus icon">
+  <img src="Resources/AppIcon.png" width="160" alt="FirstFocus icon">
 </p>
 
 <h1 align="center">FirstFocus</h1>
