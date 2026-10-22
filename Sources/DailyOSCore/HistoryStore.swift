@@ -299,6 +299,10 @@ public enum HistoryEntryKind: Sendable, Equatable {
     /// Jev kept failing or rejected the key (CONTEXT.md: Screening
     /// Unavailable). It went straight to the model.
     case screeningUnavailable
+    /// A model call that threw instead of answering (a prompt too long, a
+    /// decode failure). The Batch stays unprocessed for another try, up to
+    /// `maxExtractionTries` (CONTEXT.md: Processed).
+    case extractionFailed(reason: String)
     /// The model's verdict on a Screened Batch, taken for the Audit Sample
     /// (CONTEXT.md; ADR 0039) once Screening is live. Never produces a
     /// Signal; exists so the cutoff can be checked against what the model
@@ -323,7 +327,16 @@ public enum HistoryEntryKind: Sendable, Equatable {
         case .screening(let decision): decision.summary
         case .screeningFailed(let reason): screeningFailurePrefix + reason
         case .screeningUnavailable: "Screening unavailable"
+        case .extractionFailed(let reason): extractionFailurePrefix + reason
         case .extraction, .audit, .rerun: ""
+        }
+    }
+
+    /// Why a failed call failed, stored in its own column.
+    public var failureReason: String? {
+        switch self {
+        case .screeningFailed(let reason), .extractionFailed(let reason): reason
+        default: nil
         }
     }
 
@@ -334,11 +347,15 @@ public enum HistoryEntryKind: Sendable, Equatable {
         case .screening: "screening"
         case .screeningFailed: "screening_failed"
         case .screeningUnavailable: "screening_unavailable"
+        case .extractionFailed: "extraction_failed"
         case .audit: "audit"
         case .rerun: "rerun"
         }
     }
 }
+
+/// How a failed model call's row begins, before its reason.
+public let extractionFailurePrefix = "Extraction failed: "
 
 /// How far either side of the cutoff a Screening score still counts as a
 /// close call (CONTEXT.md: Borderline).

@@ -64,112 +64,29 @@ public struct ExtractionDependencies: Sendable {
     }
 }
 
-/// Runs Extraction over whichever of `messages` the store has no Processed
-/// record for yet, a closed Batch at a time (ADR 0039), mints and persists
-/// whatever Signals Extraction produces for each, then returns every
-/// currently open Messages Signal. `now` decides which Batches have closed;
-/// `nil` treats every Batch as closed. A Batch still open is left
-/// unprocessed for a later pass. A Batch left unrecorded by a failed store
-/// write is simply retried on a later run, same as it staying Processed
-/// forever once a write does succeed.
-func extractSignals(
-    from messages: [ChatMessage],
-    deps: ExtractionDependencies,
-    rules: PassRules,
-    priority: TaskPriority = .userInitiated,
-    now: Date? = nil
-) async -> [Signal] {
-    await runIntakePass(
-        rules, over: deps.store.unprocessedBatches(in: messages, now: now).closed, allMessages: messages,
-        deps: deps, priority: priority
-    )
-    return deps.store.openSignals()
-}
-
 /// The share of Screened Batches that still go to the model once Screening
 /// is live (CONTEXT.md: Audit Sample).
 public let auditSampleRate = 0.1
 
 /// What judging one Batch produced: new Signals, and the Suggestions its
-/// answer Supersedes (ADR 0040).
+/// answer Supersedes (ADR 0040). `failure` is set when the model was
+/// called and threw, in which case there are no Signals and the Batch is
+/// not judged yet.
 struct BatchOutcome {
     var signals: [Signal] = []
     var supersessions: [Supersession] = []
+    var failure: String?
 }
+
+/// How many times the model may fail on a Batch before it is marked
+/// Processed with no Signals (CONTEXT.md: Processed). Covers a decode
+/// failure that passes, without putting a Batch whose prompt will always
+/// be too long through the model on every pass.
+public let maxExtractionTries = 3
 
 /// How many of a Chat's undecided Suggestions the model is shown (ADR
 /// 0040): the newest, so the list fits the context.
 public let maxOpenSuggestionsShown = 5
-
-/// The first-run backfill (ticket 08), self-thread only (ADR 0007: the
-/// widened Messages source is never backfilled): walks the full self-thread
-/// history, newest first per `messages`' own ordering, committing each
-/// message's result to the store as it's produced so quitting mid-run and
-/// relaunching resumes at the first unprocessed message rather than
-/// starting over. `onProgress` fires once per message in `messages`
-/// (including ones already Processed from an earlier run), with the
-/// running count against the full total, so a resumed run reports accurate
-/// progress from wherever it left off rather than restarting the count at
-/// zero. `onProgress` is plain and `@Sendable` — it fires from wherever
-/// this function happens to run, off the main actor; a caller updating UI
-/// state is responsible for hopping back to its own actor.
-func runBackfill(
-    messages: [ChatMessage],
-    deps: ExtractionDependencies,
-    rules: PassRules,
-    priority: TaskPriority = .userInitiated,
-    onProgress: @escaping @Sendable (_ completed: Int, _ total: Int) -> Void = { _, _ in }
-) async {
-    // Every Batch counts as closed: a first-run backfill reads history,
-    // where every conversation has long gone quiet.
-    let batches = deps.store.unprocessedBatches(in: messages, now: nil).closed
-    let alreadyProcessed = messages.count - batches.reduce(0) { $0 + $1.messages.count }
-    await runIntakePass(
-        rules, over: batches, allMessages: messages, deps: deps, priority: priority,
-        progress: PassProgress(offset: alreadyProcessed, total: messages.count, report: onProgress)
-    )
-}
-
-/// Ticket 12's manual re-extraction: re-runs ingestion over items a
-/// previous pass found nothing in. Purely additive (ADR 0004) — every
-/// candidate is already Processed, so this never records a Batch
-/// again; it only widens the store with whatever new Signals this pass
-/// produces, and only for `store.reExtractionCandidates()` (items with no
-/// open or checked-off Signal). A message not currently in `messages` —
-/// deleted, in a Chat that's since gone Automated, outside the Messages
-/// source's own scope, or (ticket: re-extraction settings) older than the
-/// caller's configured lookback window (`MessagesIntake.reExtract` already
-/// filters `messages` down to that window before this ever runs) — simply
-/// can't be a candidate, since there's no text left to check.
-func runReExtraction(
-    messages: [ChatMessage],
-    deps: ExtractionDependencies,
-    rules: PassRules,
-    priority: TaskPriority = .userInitiated,
-    onProgress: @escaping @Sendable (_ completed: Int, _ total: Int) -> Void = { _, _ in }
-) async {
-    let batches = deps.store.reExtractionCandidates().compactMap { deps.store.batch(named: $0, in: messages) }
-    await runIntakePass(
-        rules, over: batches, allMessages: messages, deps: deps, priority: priority,
-        progress: PassProgress(report: onProgress)
-    )
-}
-
-/// "This was work" (ADR 0036): puts one Screened message straight through
-/// the model, bypassing Screening, and writes whatever it produces through
-/// the same additive path re-extraction uses, so a Signal lands in
-/// Suggestions. `messages` is the full batch, for same-chat context. A
-/// message no longer in `messages` produces nothing.
-func runExplicitExtraction(
-    sourceRef: String,
-    messages: [ChatMessage],
-    deps: ExtractionDependencies,
-    rules: PassRules,
-    priority: TaskPriority = .userInitiated
-) async {
-    let target = deps.store.batch(named: sourceRef, in: messages).map { [$0] } ?? []
-    await runIntakePass(rules, over: target, allMessages: messages, deps: deps, priority: priority)
-}
 
 /// How a pass reports progress. Counts messages, not Batches, starting
 /// from `offset` (messages already Processed before this pass) out of
@@ -194,7 +111,8 @@ struct PassRules {
     var recordsProcessed: Bool
 }
 
-/// The shared shape behind every kind of pass: mark the Automated Chats
+/// The shared shape behind every kind of pass, which Messages Intake runs
+/// over the Batches each kind selects: mark the Automated Chats
 /// in `allMessages` once, then judge each Batch in `batches` and record
 /// what it produced. `allMessages` is always the whole read, even when
 /// `batches` covers only some of it, since `recentContext` draws a Batch's
@@ -202,8 +120,13 @@ struct PassRules {
 /// so other pending work can interleave.
 ///
 /// `rules` decides whether it screens, whether the model may Supersede,
-/// and how each Batch's result is recorded.
-private func runIntakePass(
+/// and how each Batch's result is recorded. A Batch the model failed on
+/// is left unprocessed for the next pass until it has failed
+/// `maxExtractionTries` times, then recorded Processed with no Signals; a
+/// pass that doesn't record Batches has nothing more to do with it. A
+/// Batch left unrecorded by a failed store write is retried on a later
+/// pass too.
+func runIntakePass(
     _ rules: PassRules,
     over batches: [MessageBatch],
     allMessages: [ChatMessage],
@@ -222,7 +145,11 @@ private func runIntakePass(
             revisesSuggestions: rules.mayRevise
         )
         do {
-            if rules.recordsProcessed {
+            if outcome.failure != nil {
+                if rules.recordsProcessed, try deps.store.recordExtractionFailure(batch) >= maxExtractionTries {
+                    try deps.store.recordProcessedBatch(batch, signals: [])
+                }
+            } else if rules.recordsProcessed {
                 try deps.store.recordProcessedBatch(batch, signals: outcome.signals, superseding: outcome.supersessions)
             } else if !outcome.signals.isEmpty {
                 try deps.store.recordReExtractedSignals(sourceRef: batch.id, signals: outcome.signals)
@@ -357,8 +284,14 @@ private func judge(
     do {
         raw = try await deps.extractor.extract(from: prompt, priority: priority)
     } catch {
-        logFailure(sourceRef: batch.id, error: error)
-        return BatchOutcome()
+        let reason = extractionFailureReason(error)
+        log("model call failed sourceRef=\(batch.id): \(error)")
+        // ADR 0029: every model call leaves a History row, a failed one too.
+        try? deps.historyStore?.record(HistoryEntry(
+            subject: subject, kind: .extractionFailed(reason: reason), modelUsed: deps.extractor.modelDisplayName,
+            signalCount: 0, renderedContext: prompt
+        ))
+        return BatchOutcome(failure: reason)
     }
 
     // An UPDATE or CANCEL can only name a Suggestion the prompt listed, and
@@ -445,6 +378,20 @@ private func screen(
         renderedContext: input.text
     ))
     return decision.wasScreened
+}
+
+/// What a failed model call's History row says went wrong.
+public func extractionFailureReason(_ error: Error) -> String {
+    switch error as? LlamaCppIntentExtractorError {
+    case .promptTooLong(let tokenCount, let contextSize):
+        "prompt too long, \(tokenCount) tokens for a \(contextSize)-token model"
+    case .decodeFailed:
+        "the model stopped while reading"
+    case .tokenizationFailed:
+        "the prompt couldn't be read into tokens"
+    default:
+        "\(error)"
+    }
 }
 
 private func logFailure(sourceRef: String, error: Error) {

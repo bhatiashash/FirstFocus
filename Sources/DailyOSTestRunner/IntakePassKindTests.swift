@@ -33,6 +33,10 @@ private func isExtractionUnavailable(_ result: MessagesIntake.Result) -> Bool {
     if case .extractionUnavailable = result { return true } else { return false }
 }
 
+private func isNotRead(_ result: MessagesIntake.Result) -> Bool {
+    if case .notRead = result { return true } else { return false }
+}
+
 func registerIntakePassKindTests(_ runner: TestRunner) {
     runner.suite("MessagesIntake: every action reads Messages the same way") { r in
         r.run("a denied Gate returns Unavailable from refresh, re-extract and extract-now alike") {
@@ -43,7 +47,7 @@ func registerIntakePassKindTests(_ runner: TestRunner) {
             try expect(isUnavailable(refreshed) && isUnavailable(reExtracted) && isUnavailable(explicit))
         }
 
-        r.run("with no model loaded every action returns extraction-unavailable, and refresh still garbage collects") {
+        r.run("with no model loaded a refresh returns extraction-unavailable and still garbage collects, and the others read nothing") {
             let store = makeTestSignalStore()
             let gone = Signal(
                 id: "s1", source: .messages, sourceRef: "m-gone", label: "Old", originalText: "old", createdAt: Date(),
@@ -59,7 +63,8 @@ func registerIntakePassKindTests(_ runner: TestRunner) {
             let refreshed = await intake.refresh(now: Date())
             let reExtracted = await intake.reExtract(now: Date(), lookbackDays: 7)
             let explicit = await intake.extractNow(sourceRef: "m1")
-            try expect(isExtractionUnavailable(refreshed) && isExtractionUnavailable(reExtracted) && isExtractionUnavailable(explicit))
+            try expect(isExtractionUnavailable(refreshed), "a refresh reads Messages first, for garbage collection")
+            try expect(isNotRead(reExtracted) && isNotRead(explicit), "the others stop before reading, so they say nothing about the Gate")
             try expect(!store.openSignals().contains { $0.id == "s1" }, "a vanished message's Signal is collected with no model")
         }
     }

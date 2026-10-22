@@ -35,6 +35,11 @@ private let fixture: [HistoryEntry] = [
         chatId: chatId, kind: .screening(ScreeningDecision(probability: 0.1, mode: .live(cutoff: 0.4))),
         sourceRef: "screened", sender: "Mom", transcript: transcript("send the invoice")
     ),
+    HistoryEntry(
+        timestamp: Date().addingTimeInterval(-50), sourceRawText: "pick up the cake", modelUsed: "Q", signalCount: 0,
+        chatId: chatId, kind: .extractionFailed(reason: "the model stopped while reading"), sourceRef: "failed",
+        sender: "Mom", transcript: transcript("pick up the cake")
+    ),
 ]
 
 /// Everything History and the Suggested Tasks Inbox show that an action on
@@ -68,6 +73,7 @@ private func take(_ action: HistoryBatchAction, on batch: HistoryBatch, in app: 
     case .rerun: await app.actions.rerun(batch)
     case .mute: app.actions.toggleMute(batch)
     case .restore: app.actions.restore(batch)
+    case .tryAgain: await app.actions.tryAgain(batch)
     }
 }
 
@@ -83,6 +89,8 @@ private func makeFixtureApp(extractor: (any IntentExtractor)?) throws -> (Histor
     )])
     try signals.recordOneMessageBatch("none", signals: [])
     try signals.recordOneMessageBatch("screened", signals: [])
+    // Intake gave up on it after the model kept failing.
+    try signals.recordOneMessageBatch("failed", signals: [])
     try signals.recordOneMessageBatch("flowers", signals: [Signal(
         id: "s0", source: .messages, sourceRef: "flowers", label: "Order flowers", originalText: "Mom: order flowers",
         createdAt: Date(), provenance: .inferred, chatId: chatId

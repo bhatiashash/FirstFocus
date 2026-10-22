@@ -16,6 +16,10 @@ public enum HistoryBatchAction: CaseIterable, Sendable {
     /// Puts back in the Inbox a Suggestion the Batch's UPDATE or CANCEL
     /// Superseded (superseded-restore).
     case restore
+    /// Sends a Batch the model kept failing on back to it once more, and
+    /// keeps any Signals it finds. Records no Correction: the model failed,
+    /// it didn't judge wrong.
+    case tryAgain
 }
 
 /// How an offered action shows.
@@ -46,16 +50,27 @@ public struct HistoryFacts: Equatable, Sendable {
     /// What each Batch Superseded, by `sourceRef`.
     public var supersessions: [String: [RecordedSupersession]]
     public var mutedChats: Set<Int>
+    /// Which of the Batches are Processed, by `sourceRef`. A Batch the model
+    /// failed on is retried until it is (CONTEXT.md: Processed).
+    public var processedBatches: Set<String>
 
     public init(
         showsScreening: Bool, isModelLoaded: Bool, correctionTypes: [String: Set<CorrectionType>],
-        supersessions: [String: [RecordedSupersession]], mutedChats: Set<Int>
+        supersessions: [String: [RecordedSupersession]], mutedChats: Set<Int>, processedBatches: Set<String> = []
     ) {
         self.showsScreening = showsScreening
         self.isModelLoaded = isModelLoaded
         self.correctionTypes = correctionTypes
         self.supersessions = supersessions
         self.mutedChats = mutedChats
+        self.processedBatches = processedBatches
+    }
+
+    /// A Batch whose model calls all failed and that intake has stopped
+    /// trying.
+    public func gaveUp(on batch: HistoryBatch) -> Bool {
+        guard case .extractionFailed = batch.result, let sourceRef = batch.sourceRef else { return false }
+        return processedBatches.contains(sourceRef)
     }
 
     public func correctionTypes(of batch: HistoryBatch) -> Set<CorrectionType> {
@@ -112,6 +127,9 @@ private func offerState(_ action: HistoryBatchAction, for batch: HistoryBatch, f
         return batch.chatId == nil ? nil : .enabled
     case .restore:
         return restoreState(facts.supersessions(of: batch))
+    case .tryAgain:
+        guard tryAgainTarget(batch, facts: facts) != nil else { return nil }
+        return modelState
     }
 }
 
@@ -175,14 +193,24 @@ func thisWasWorkTarget(_ batch: HistoryBatch, facts: HistoryFacts) -> HistoryAct
     return target(unjudgedScreenedRow(batch))
 }
 
-/// "Add task": the model judged the Batch and found nothing, or, with the
-/// Screening toggle off, Screening stopped it before the model saw it
+/// Try again: a Batch intake gave up on after the model kept failing.
+/// While it still has tries left, intake retries it on its own.
+func tryAgainTarget(_ batch: HistoryBatch, facts: HistoryFacts) -> HistoryActionTarget? {
+    guard facts.gaveUp(on: batch) else { return nil }
+    return target(batch.extractionFailureRow)
+}
+
+/// "Add task": the model judged the Batch and found nothing, or intake
+/// gave up on it after the model kept failing, or, with the Screening
+/// toggle off, Screening stopped it before the model saw it
 /// (screening-optional). Its Suggestion is made from the transcript, so a
 /// row without one can't.
 func addTaskTarget(_ batch: HistoryBatch, facts: HistoryFacts) -> HistoryActionTarget? {
     let row: HistoryEntry?
     if batch.result == .noTask {
         row = batch.resultRow
+    } else if facts.gaveUp(on: batch) {
+        row = batch.extractionFailureRow
     } else if !facts.showsScreening {
         row = unjudgedScreenedRow(batch)
     } else {

@@ -462,6 +462,38 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         return results
     }
 
+    public func recordExtractionFailure(_ batch: MessageBatch) throws -> Int {
+        guard let db = open() else { throw SignalStoreError.cannotOpen }
+        defer { sqlite3_close(db) }
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK else {
+            throw SignalStoreError.writeFailed
+        }
+        do {
+            var tries = 0
+            for messageId in batch.memberIds {
+                var statement: OpaquePointer?
+                defer { sqlite3_finalize(statement) }
+                let sql = """
+                INSERT INTO extraction_failures (message_id, tries) VALUES (?, 1)
+                ON CONFLICT(message_id) DO UPDATE SET tries = tries + 1 RETURNING tries
+                """
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    throw SignalStoreError.writeFailed
+                }
+                sqlite3_bind_text(statement, 1, messageId, -1, sqliteTransient)
+                guard sqlite3_step(statement) == SQLITE_ROW else { throw SignalStoreError.writeFailed }
+                tries = max(tries, Int(sqlite3_column_int64(statement, 0)))
+            }
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw SignalStoreError.writeFailed
+            }
+            return tries
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
     public func focusListPlacements() -> [FocusListPlacement]? {
         guard let db = open() else { return nil }
         defer { sqlite3_close(db) }
@@ -899,6 +931,10 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         CREATE TABLE IF NOT EXISTS snoozes (
             signal_id TEXT PRIMARY KEY,
             snoozed_until TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS extraction_failures (
+            message_id TEXT PRIMARY KEY,
+            tries INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS focus_list (
             reminder_id TEXT PRIMARY KEY,

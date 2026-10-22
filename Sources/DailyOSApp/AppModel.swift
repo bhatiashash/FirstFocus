@@ -534,10 +534,12 @@ public final class AppModel: ObservableObject {
         republish()
     }
 
-    /// A pass's result onto the Board. A pass has read Messages, so a
-    /// launch-time identity mismatch no longer decides anything.
+    /// A pass's result onto the Board. A pass that read Messages found out
+    /// for itself, so a launch-time identity mismatch no longer decides
+    /// anything.
     private func applyPass(_ result: MessagesIntake.Result) {
         board.apply(messages: result)
+        if case .notRead = result { return }
         messagesIdentityMismatch = false
     }
 

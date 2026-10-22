@@ -83,6 +83,11 @@ public struct HistoryBatch: Identifiable, Equatable, Sendable {
         rows.last { if case .screeningFailed = $0.kind { return true } else { return false } }
     }
 
+    /// The latest model call that failed (CONTEXT.md: Processed).
+    public var extractionFailureRow: HistoryEntry? {
+        rows.last { if case .extractionFailed = $0.kind { return true } else { return false } }
+    }
+
     /// Whether the Batch skipped Screening because the breaker was open
     /// (CONTEXT.md: Screening Unavailable).
     public var wasScreeningUnavailable: Bool { rows.contains { $0.kind == .screeningUnavailable } }
@@ -131,6 +136,9 @@ public struct HistoryBatch: Identifiable, Equatable, Sendable {
             let labels = parseExtractionResults(resultRow.rawOutput).compactMap(\.label)
             return labels.isEmpty ? .noTask : .tasks(labels)
         }
+        if let failure = extractionFailureRow, case .extractionFailed(let reason) = failure.kind {
+            return .extractionFailed(reason: reason)
+        }
         if let screening = screeningRow?.screening {
             return screening.wasScreened
                 ? .screened(probability: screening.probability, cutoff: screening.cutoff)
@@ -149,7 +157,7 @@ public struct HistoryBatch: Identifiable, Equatable, Sendable {
         guard !showsScreening else { return resultSummary }
         switch result {
         case .screened, .letThrough, .screeningFailed: return "Not read by the model."
-        case .tasks, .noTask: return resultSummary
+        case .tasks, .noTask, .extractionFailed: return resultSummary
         }
     }
 
@@ -169,6 +177,8 @@ public struct HistoryBatch: Identifiable, Equatable, Sendable {
             "Let through Screening at \(formatScore(probability)). No model result recorded."
         case .screeningFailed(let reason):
             "Screening failed (\(reason)). No model result recorded."
+        case .extractionFailed(let reason):
+            "The model call failed (\(reason))."
         }
     }
 }
@@ -184,6 +194,8 @@ public enum HistoryBatchResult: Equatable, Sendable {
     /// Screening let the Batch through but no model row is recorded for it.
     case letThrough(probability: Double)
     case screeningFailed(reason: String)
+    /// The model was called and threw; no later call answered.
+    case extractionFailed(reason: String)
 }
 
 public func formatScore(_ value: Double) -> String {
@@ -266,7 +278,8 @@ public struct HistoryBadge: Equatable, Sendable {
 }
 
 /// What a History row says about its Batch. Only exceptions get a badge:
-/// a task, a failed Screening, Borderline, Corrected and Muted. The routine
+/// a task, a failed Screening, a failed model call, Borderline, Corrected
+/// and Muted. The routine
 /// outcomes (no task, Screened, let through) carry none, since most of a
 /// week's Batches are chat filler and a badge on each would be noise; the
 /// detail pane still says what happened.
@@ -288,6 +301,8 @@ public func historyBadges(
         [HistoryBadge(text: labels.count == 1 ? "Task" : "\(labels.count) tasks", symbol: "checkmark.circle")]
     case .screeningFailed:
         showsScreening ? [HistoryBadge(text: "Screening failed", symbol: "xmark.octagon")] : []
+    case .extractionFailed:
+        [HistoryBadge(text: "Model failed", symbol: "exclamationmark.octagon")]
     case .noTask, .screened, .letThrough:
         []
     }

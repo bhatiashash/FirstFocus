@@ -123,9 +123,13 @@ public final class MessagesIntake {
     /// succeeded, there is simply no model to run text through, and a
     /// caller holding a Messages array from an earlier pass should leave
     /// it exactly as it was rather than clear it.
+    ///
+    /// `.notRead` is a pass that stopped before reading Messages, since
+    /// with no model it had nothing to do: it says nothing about the Gate.
     public enum Result: Sendable {
         case unavailable
         case extractionUnavailable
+        case notRead
         case refreshed([Signal])
     }
 
@@ -254,8 +258,8 @@ public final class MessagesIntake {
     /// — `ReExtractionSettings.lookbackDays` is the caller's usual source
     /// for this, not `extractionLookbackDays`, which is a different,
     /// separately-tuned number for automatic intake.
-    /// `.extractionUnavailable` when there's no model to run, the same as
-    /// `refresh` — there's nothing to re-extract with.
+    /// `.notRead` when there's no model to run: there's nothing to
+    /// re-extract with, so Messages isn't read at all.
     ///
     /// Waits the running pass out rather than joining it, the one place
     /// this differs from `refresh`. A refresh that joins still gets an
@@ -348,7 +352,7 @@ public final class MessagesIntake {
     ) async -> Result {
         let passStartedAt = Date()
         let rules = request.kind.rules
-        if request.kind != .automatic, deps == nil { return .extractionUnavailable }
+        if request.kind != .automatic, deps == nil { return .notRead }
         let source = messagesSource
         let store = signalStore
 
@@ -368,13 +372,27 @@ public final class MessagesIntake {
             guard let deps else { return .extractionUnavailable }
             let extractionMessages = withinExtractionWindow(messages, now: now)
             if !store.isBackfillComplete() {
+                // The first-run backfill (ticket 08): every Batch counts as
+                // closed, since history has long gone quiet. Each Batch's
+                // result is committed as it's produced, so quitting mid-run
+                // resumes at the first unprocessed one, and progress counts
+                // what an earlier run already did.
                 onProgress(0, extractionMessages.count)
-                await runBackfill(
-                    messages: extractionMessages, deps: deps, rules: rules, priority: priority, onProgress: onProgress
+                let batches = store.unprocessedBatches(in: extractionMessages, now: nil).closed
+                let alreadyProcessed = extractionMessages.count - batches.reduce(0) { $0 + $1.messages.count }
+                await runIntakePass(
+                    rules, over: batches, allMessages: extractionMessages, deps: deps, priority: priority,
+                    progress: PassProgress(offset: alreadyProcessed, total: extractionMessages.count, report: onProgress)
                 )
                 try? store.markBackfillComplete()
             }
-            let signals = await extractSignals(from: extractionMessages, deps: deps, rules: rules, priority: priority, now: now)
+            // Every closed Batch nothing has Processed yet (ADR 0039). One
+            // still open waits for a later pass.
+            await runIntakePass(
+                rules, over: store.unprocessedBatches(in: extractionMessages, now: now).closed,
+                allMessages: extractionMessages, deps: deps, priority: priority
+            )
+            let signals = store.openSignals()
             scheduleWakeUp(
                 at: store.unprocessedBatches(in: extractionMessages, now: now).nextClosingAt, now: now,
                 passStartedAt: passStartedAt
@@ -382,12 +400,22 @@ public final class MessagesIntake {
             return .refreshed(signals)
         case .reExtraction(let now, let lookbackDays):
             guard let deps else { return .extractionUnavailable }
+            // Ticket 12: only Batches a pass found nothing in, and only
+            // those still in the lookback window, since a message no longer
+            // read has no text left to check (ADR 0004).
             let window = withinExtractionWindow(messages, now: now, lookbackDays: lookbackDays)
-            await runReExtraction(messages: window, deps: deps, rules: rules, priority: priority, onProgress: onProgress)
+            let batches = store.reExtractionCandidates().compactMap { store.batch(named: $0, in: window) }
+            await runIntakePass(
+                rules, over: batches, allMessages: window, deps: deps, priority: priority,
+                progress: PassProgress(report: onProgress)
+            )
             return .refreshed(store.openSignals())
         case .explicit(let sourceRef):
             guard let deps else { return .extractionUnavailable }
-            await runExplicitExtraction(sourceRef: sourceRef, messages: messages, deps: deps, rules: rules, priority: priority)
+            // "This was work" or Try again: the one Batch, with the whole
+            // read as its context. One no longer read produces nothing.
+            let target = store.batch(named: sourceRef, in: messages).map { [$0] } ?? []
+            await runIntakePass(rules, over: target, allMessages: messages, deps: deps, priority: priority)
             return .refreshed(store.openSignals())
         }
     }

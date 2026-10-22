@@ -50,7 +50,8 @@ public final class HistoryBatchActions {
             showsScreening: base?.showsScreening ?? screeningSettings.isEnabled,
             isModelLoaded: base?.isModelLoaded ?? (intake.extractor != nil),
             correctionTypes: corrections.types(forBatches: refs), supersessions: signalStore.supersessions(byBatches: refs),
-            mutedChats: base?.mutedChats ?? signalStore.mutedChatIds()
+            mutedChats: base?.mutedChats ?? signalStore.mutedChatIds(),
+            processedBatches: Set(refs.filter { signalStore.isProcessed(sourceRef: $0) })
         )
     }
 
@@ -157,6 +158,17 @@ public final class HistoryBatchActions {
             label: label, sourceRef: target.sourceRef, chatId: target.chatId, transcript: transcript,
             isSelfThread: target.row.isSelfThread, chatIdentifier: target.row.chatIdentifier
         ))
+        changed()
+    }
+
+    /// Sends a Batch intake gave up on back to the model, skipping
+    /// Screening, so any Signal it holds lands in Suggestions. Records no
+    /// Correction. Waits for a running pass and then runs its own (ADR 0034).
+    public func tryAgain(_ batch: HistoryBatch) async {
+        let facts = facts(forBatches: [batch])
+        guard historyBatchOffers(for: batch, facts: facts)[.tryAgain] == .enabled,
+              let target = tryAgainTarget(batch, facts: facts) else { return }
+        await app?.extractNow(sourceRef: target.sourceRef)
         changed()
     }
 

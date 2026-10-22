@@ -325,6 +325,12 @@ private struct HistoryDetailActions: View {
                 }
                 .historyActionState(state, help: "Send this Batch to the local model now")
             }
+            if let state = offers[.tryAgain] {
+                Button("Try Again") {
+                    Task { await actions.tryAgain(batch) }
+                }
+                .historyActionState(state, help: "Send this Batch to the local model once more")
+            }
             if offers[.mute] != nil {
                 Button(offers.isMuted ? "Unmute Thread" : "Mute Thread") {
                     actions.toggleMute(batch)
@@ -377,6 +383,10 @@ private struct HistoryActionsMenu: View {
             }
             if let state = offers[.thisWasWork] {
                 Button(menuTitle("This was work", state)) { Task { await actions.thisWasWork(batch) } }
+                    .disabled(state != .enabled)
+            }
+            if let state = offers[.tryAgain] {
+                Button(menuTitle("Try Again", state)) { Task { await actions.tryAgain(batch) } }
                     .disabled(state != .enabled)
             }
             if offers[.mute] != nil {

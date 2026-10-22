@@ -30,6 +30,13 @@ public protocol BatchLedger: Sendable {
     /// that got there first always wins.
     func recordProcessedBatch(_ batch: MessageBatch, signals: [Signal], superseding: [Supersession]) throws
 
+    /// Notes that the model failed on `batch` once more, and returns how
+    /// many times it has failed on it, counted per message so a Batch that
+    /// picks up a later message on its next try keeps its count. Never
+    /// marks anything Processed; the caller decides when to stop trying
+    /// (CONTEXT.md: Processed).
+    func recordExtractionFailure(_ batch: MessageBatch) throws -> Int
+
     /// The member message ids of the Batch named `batchId`, oldest first.
     /// A message Processed before batching is a Batch of one, so a
     /// `batchId` with no Batch recorded gives just `[batchId]`. Only a

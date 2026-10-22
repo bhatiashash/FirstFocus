@@ -27,6 +27,9 @@ final class FakeIntentExtractor: IntentExtractor, @unchecked Sendable {
     /// Runs inside each call before it answers, so a test can change
     /// settings while a pass is mid-flight.
     var onExtract: (@Sendable () async -> Void)?
+    /// While set, every call is counted and then throws this, the way a
+    /// real model throws on a prompt too long or a failed decode.
+    var failure: Error?
 
     init(
         responses: [String: String] = [:], defaultResponse: String = "NONE", modelDisplayName: String = "Fake Model",
@@ -42,6 +45,7 @@ final class FakeIntentExtractor: IntentExtractor, @unchecked Sendable {
         calls.append(text)
         callPriorities.append(priority)
         await onExtract?()
+        if let failure { throw failure }
         return responses[text] ?? responses[judgedText(in: text)] ?? defaultResponse
     }
 

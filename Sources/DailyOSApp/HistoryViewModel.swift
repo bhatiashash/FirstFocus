@@ -217,7 +217,7 @@ public final class HistoryViewModel: ObservableObject {
         switch segment {
         case .overview:
             showsUnfilteredLog || producedTask(batch) || superseded(batch) || isBorderlineBatch(batch, cutoff: cutoff)
-                || isCorrected(batch)
+                || isCorrected(batch) || modelFailed(batch)
         case .borderline: isBorderlineBatch(batch, cutoff: cutoff)
         case .corrected: isCorrected(batch)
         case .starred: batch.isStarred
@@ -226,6 +226,12 @@ public final class HistoryViewModel: ObservableObject {
 
     private func producedTask(_ batch: HistoryBatch) -> Bool {
         if case .tasks = batch.result { true } else { false }
+    }
+
+    /// A Batch the model failed on is listed: nothing else would show that
+    /// it was never judged.
+    private func modelFailed(_ batch: HistoryBatch) -> Bool {
+        if case .extractionFailed = batch.result { true } else { false }
     }
 
     /// A CANCEL finds no task but still changed the Inbox, so Overview

@@ -96,7 +96,7 @@ public final class SQLiteHistoryStore: HistoryStore, @unchecked Sendable {
         } else {
             sqlite3_bind_null(statement, 20)
         }
-        if case .screeningFailed(let reason) = entry.kind {
+        if let reason = entry.kind.failureReason {
             sqlite3_bind_text(statement, 21, reason, -1, sqliteTransient)
         } else {
             sqlite3_bind_null(statement, 21)
@@ -325,6 +325,9 @@ public final class SQLiteHistoryStore: HistoryStore, @unchecked Sendable {
         case "screening_failed":
             guard let reason = text(statement, 20) else { return nil }
             kind = .screeningFailed(reason: reason)
+        case "extraction_failed":
+            guard let reason = text(statement, 20) else { return nil }
+            kind = .extractionFailed(reason: reason)
         case "screening":
             guard sqlite3_column_type(statement, 11) != SQLITE_NULL, sqlite3_column_type(statement, 16) != SQLITE_NULL
             else { return nil }

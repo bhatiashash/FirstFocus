@@ -92,6 +92,7 @@ public final class SignalBoard {
     /// produced. `.extractionUnavailable` deliberately leaves the share
     /// exactly as it was, never clearing it, since there's a Gate open and
     /// real Signals behind it, just no model to re-derive them with.
+    /// `.notRead` changes nothing: no read means nothing was learned.
     public func apply(messages result: MessagesIntake.Result) {
         switch result {
         case .unavailable:
@@ -99,6 +100,8 @@ public final class SignalBoard {
             availabilities[.messages] = .unavailable
         case .extractionUnavailable:
             availabilities[.messages] = .available
+        case .notRead:
+            break
         case .refreshed(let signals):
             messageSignals = signals
             availabilities[.messages] = .available
