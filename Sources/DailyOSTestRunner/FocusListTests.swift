@@ -86,17 +86,24 @@ private func placed(_ id: String, _ home: String?) -> FocusListPlacement {
 private func makeModel(_ taskSource: FakeTaskSource, _ preference: FocusListPreference) -> AppModel {
     let store = makeTestSignalStore()
     try? store.markBackfillComplete()
-    return AppModel(
-        taskSource: taskSource,
-        messagesSource: FakeMessagesSource(messages: [], availability: .available), signalStore: store,
-        contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-        refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-        foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
-        zenFocusModePreference: ZenFocusModePreference(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!),
-        focusListPreference: preference,
-        extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-        apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-    )
+    return AppModel(AppDependencies.test { d in
+        d.taskSource = taskSource
+        d.messagesSource = FakeMessagesSource(messages: [], availability: .available)
+        d.signalStore = store
+        d.contactsResolver = FakeContactsResolver()
+        d.settingsOpener = FakeSettingsOpener()
+        d.refreshClock = FakeRefreshClock()
+        d.eventKitChanges = FakeEventKitChangeObserver()
+        d.foregroundObserver = FakeForegroundObserver()
+        d.dayChanges = FakeDayChangeObserver()
+        d.zenFocusModePreference = ZenFocusModePreference(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
+        d.focusListPreference = preference
+        d.extractor = FakeIntentExtractor()
+        d.historyStore = makeTestHistoryStore()
+        d.correctionStore = FakeCorrectionStore()
+        d.apiKeyStore = FakeAPIKeyStore()
+        d.bundlePath = "/nonexistent"
+    })
 }
 
 func registerFocusListTests(_ runner: TestRunner) {

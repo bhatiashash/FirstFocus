@@ -257,17 +257,25 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                 let source = FakeMessagesSource(messages: quietBatches(2))
                 let screener = FakeScreener(failure: JEVResponseError.httpStatus(401))
                 let keys = FakeAPIKeyStore(key: "tsk-1")
-                let model = AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: source, signalStore: store, contactsResolver: FakeContactsResolver(),
-                    settingsOpener: FakeSettingsOpener(), refreshClock: FakeRefreshClock(),
-                    eventKitChanges: FakeEventKitChangeObserver(), foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(), screeningSettings: settings, apiKeyStore: keys,
-                    makeScreener: { _ in screener }, bundlePath: "/nonexistent"
-                )
+                let model = AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = source
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = FakeIntentExtractor()
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.screeningSettings = settings
+                    d.apiKeyStore = keys
+                    d.makeScreener = { _ in screener }
+                    d.bundlePath = "/nonexistent"
+                })
                 let viewModel = ScreeningSettingsViewModel(settings: settings, keyStore: keys, app: model)
                 return Harness(model: model, viewModel: viewModel, source: source, screener: screener)
             }
@@ -326,21 +334,28 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                 let defaults = throwawayDefaults()
                 let settings = ScreeningSettings(defaults: defaults)
                 settings.isEnabled = true
-                return AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(), signalStore: makeTestSignalStore(),
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(), screeningSettings: settings, apiKeyStore: keys,
-                    makeScreener: { key in
+                return AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource()
+                    d.signalStore = makeTestSignalStore()
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = FakeIntentExtractor()
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.screeningSettings = settings
+                    d.apiKeyStore = keys
+                    d.makeScreener = { key in
                         built.append(key)
                         return FakeScreener()
-                    }, bundlePath: "/nonexistent"
-                )
+                    }
+                    d.bundlePath = "/nonexistent"
+                })
             }
             await MainActor.run {
                 model.applyScreeningSettings()

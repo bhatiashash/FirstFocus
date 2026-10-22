@@ -260,87 +260,52 @@ public final class AppModel: ObservableObject {
         undoBar.hiddenIDs.union(checkOffCoordinator.hiddenIDs).union(deletingSignalIDs)
     }
 
-    /// `settingsOpener` and `foregroundObserver` carry no default on
-    /// purpose: both are AppKit, which this target does not import, so the
-    /// executable supplies the real ones and a test supplies fakes. Every
-    /// other dependency keeps a production default, so constructing this
-    /// for real stays a no-argument call at the one site that does it.
-    /// `bundlePath` feeds `MessagesIntake`'s signing-identity check
-    /// (ticket 10) — injected rather than read from `Bundle.main` inside
-    /// it, so a test can drive a mismatch at all.
-    public init(
-        taskSource: any TaskSource = EventKitTaskSource(),
-        messagesSource: any MessagesSource = ChatDBMessagesSource(path: liveChatDBPath),
-        signalStore: any SignalStore = SQLiteSignalStore(path: SQLiteSignalStore.defaultPath(bundleIdentifier: bundleIdentifier)),
-        contactsResolver: any ContactsResolver = CNContactsResolver(),
-        settingsOpener: any SettingsOpener,
-        refreshClock: any RefreshClock = TimerRefreshClock(),
-        eventKitChanges: any EventKitChangeObserver = NotificationCenterEventKitChangeObserver(),
-        messagesChanges: any MessagesChangeObserver = NoMessagesChangeObserver(),
-        foregroundObserver: any ForegroundObserver,
-        dayChanges: any DayChangeObserver = NotificationCenterDayChangeObserver(),
-        zenFocusModePreference: ZenFocusModePreference = ZenFocusModePreference(),
-        captureHotkeyPreference: CaptureHotkeyPreference = CaptureHotkeyPreference(),
-        focusListPreference: FocusListPreference = FocusListPreference(),
-        extractionSettings: ExtractionSettings = ExtractionSettings(),
-        reExtractionSettings: ReExtractionSettings = ReExtractionSettings(),
-        undoClock: any UndoClock = TaskSleepUndoClock(),
-        undoWindow: TimeInterval = 5,
-        extractor: (any IntentExtractor)? = nil,
-        historyStore: any HistoryStore = SQLiteHistoryStore(path: SQLiteHistoryStore.defaultPath(bundleIdentifier: bundleIdentifier)),
-        participantLabelStore: any ParticipantLabelStore = SQLiteParticipantLabelStore(
-            path: SQLiteParticipantLabelStore.defaultPath(bundleIdentifier: bundleIdentifier)
-        ),
-        correctionStore: any CorrectionStore = SQLiteCorrectionStore(
-            path: SQLiteCorrectionStore.defaultPath(bundleIdentifier: bundleIdentifier)
-        ),
-        screeningSettings: ScreeningSettings = ScreeningSettings(),
-        filteredSMSSettings: FilteredSMSSettings = FilteredSMSSettings(),
-        apiKeyStore: any APIKeyStore = KeychainAPIKeyStore(service: bundleIdentifier),
-        makeScreener: @escaping @Sendable (String) -> any Screener = { JEVScreener(apiKey: $0) },
-        ruleStore: any RuleStore = SQLiteRuleStore(path: SQLiteRuleStore.defaultPath(bundleIdentifier: bundleIdentifier)),
-        batchWakeClock: any UndoClock = TaskSleepUndoClock(),
-        auditRoll: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) },
-        now: @escaping @MainActor () -> Date = { Date() },
-        bundlePath: String = Bundle.main.bundlePath,
-        snoozeWakeClock: any UndoClock = TaskSleepUndoClock()
-    ) {
-        self.taskSource = taskSource
-        self.contactsResolver = contactsResolver
+    /// Built only from `dependencies`, which carries no defaults: the
+    /// executable passes `AppDependencies.live(...)` and a test passes a
+    /// test value, so a test never opens a live store by accident.
+    public init(_ dependencies: AppDependencies) {
+        self.taskSource = dependencies.taskSource
+        self.contactsResolver = dependencies.contactsResolver
+        let filteredSMSSettings = dependencies.filteredSMSSettings
         let intake = MessagesIntake(
-            messagesSource: messagesSource, signalStore: signalStore, contactsResolver: contactsResolver,
-            bundlePath: bundlePath, participantLabelStore: participantLabelStore, historyStore: historyStore,
-            correctionStore: correctionStore, extractor: extractor, batchWakeClock: batchWakeClock, auditRoll: auditRoll,
+            messagesSource: dependencies.messagesSource, signalStore: dependencies.signalStore,
+            contactsResolver: dependencies.contactsResolver, bundlePath: dependencies.bundlePath,
+            participantLabelStore: dependencies.participantLabelStore, historyStore: dependencies.historyStore,
+            correctionStore: dependencies.correctionStore, extractor: dependencies.extractor,
+            batchWakeClock: dependencies.batchWakeClock, auditRoll: dependencies.auditRoll,
             ignoresFilteredSMS: { filteredSMSSettings.ignoresFilteredSMS }
         )
         self.intake = intake
-        self.board = SignalBoard(taskSource: taskSource, signalStore: signalStore, now: now)
-        self.focusList = FocusList(taskSource: taskSource, store: signalStore, board: board, preference: focusListPreference)
-        self.isFocusListEnabled = focusListPreference.isEnabled
-        self.checkOffCoordinator = CheckOffCoordinator(taskSource: taskSource, signalStore: signalStore)
-        self.undoBar = UndoBar(clock: undoClock, window: undoWindow)
-        self.settingsOpener = settingsOpener
-        self.refreshClock = refreshClock
-        self.eventKitChanges = eventKitChanges
-        self.messagesChanges = messagesChanges
-        self.foregroundObserver = foregroundObserver
-        self.dayChanges = dayChanges
-        self.zenFocusModePreference = zenFocusModePreference
-        self.isZenFocusModeEnabled = zenFocusModePreference.isEnabled
-        self.captureHotkeyPreference = captureHotkeyPreference
-        self.captureHotkeyPreset = captureHotkeyPreference.selected
-        self.extractionSettings = extractionSettings
-        self.reExtractionSettings = reExtractionSettings
-        self.historyStore = historyStore
-        self.signalStore = signalStore
-        self.corrections = Corrections(store: correctionStore)
-        self.screeningSettings = screeningSettings
-        self.apiKeyStore = apiKeyStore
-        self.makeScreener = makeScreener
-        self.ruleStore = ruleStore
-        self.now = now
-        self.rankedAt = now()
-        self.snoozeWakeClock = snoozeWakeClock
+        self.board = SignalBoard(taskSource: dependencies.taskSource, signalStore: dependencies.signalStore, now: dependencies.now)
+        self.focusList = FocusList(
+            taskSource: dependencies.taskSource, store: dependencies.signalStore, board: board,
+            preference: dependencies.focusListPreference
+        )
+        self.isFocusListEnabled = dependencies.focusListPreference.isEnabled
+        self.checkOffCoordinator = CheckOffCoordinator(taskSource: dependencies.taskSource, signalStore: dependencies.signalStore)
+        self.undoBar = UndoBar(clock: dependencies.undoClock, window: dependencies.undoWindow)
+        self.settingsOpener = dependencies.settingsOpener
+        self.refreshClock = dependencies.refreshClock
+        self.eventKitChanges = dependencies.eventKitChanges
+        self.messagesChanges = dependencies.messagesChanges
+        self.foregroundObserver = dependencies.foregroundObserver
+        self.dayChanges = dependencies.dayChanges
+        self.zenFocusModePreference = dependencies.zenFocusModePreference
+        self.isZenFocusModeEnabled = dependencies.zenFocusModePreference.isEnabled
+        self.captureHotkeyPreference = dependencies.captureHotkeyPreference
+        self.captureHotkeyPreset = dependencies.captureHotkeyPreference.selected
+        self.extractionSettings = dependencies.extractionSettings
+        self.reExtractionSettings = dependencies.reExtractionSettings
+        self.historyStore = dependencies.historyStore
+        self.signalStore = dependencies.signalStore
+        self.corrections = Corrections(store: dependencies.correctionStore)
+        self.screeningSettings = dependencies.screeningSettings
+        self.apiKeyStore = dependencies.apiKeyStore
+        self.makeScreener = dependencies.makeScreener
+        self.ruleStore = dependencies.ruleStore
+        self.now = dependencies.now
+        self.rankedAt = dependencies.now()
+        self.snoozeWakeClock = dependencies.snoozeWakeClock
 
         // Wired last, once every stored property above has a value:
         // `self` only becomes a valid `[weak self]` capture at that point.

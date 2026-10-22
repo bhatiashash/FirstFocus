@@ -81,21 +81,27 @@ func makeHistoryApp(
         settings.isEnabled = true
         return settings
     }()
-    let model = AppModel(
-        taskSource: taskSource,
-        messagesSource: FakeMessagesSource(messages: messages), signalStore: signals,
-        contactsResolver: contactsResolver, settingsOpener: FakeSettingsOpener(),
-        refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-        foregroundObserver: FakeForegroundObserver(),
-        zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-        focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-        undoClock: undoClock,
-        extractor: extractor, historyStore: history, correctionStore: corrections,
-        screeningSettings: screeningSettings,
-        apiKeyStore: FakeAPIKeyStore(key: screener == nil ? nil : "k"),
-        makeScreener: { [screener] key in screener ?? JEVScreener(apiKey: key) },
-        auditRoll: { 1 }, bundlePath: "/nonexistent"
-    )
+    let model = AppModel(AppDependencies.test { d in
+        d.taskSource = taskSource
+        d.messagesSource = FakeMessagesSource(messages: messages)
+        d.signalStore = signals
+        d.contactsResolver = contactsResolver
+        d.settingsOpener = FakeSettingsOpener()
+        d.refreshClock = FakeRefreshClock()
+        d.eventKitChanges = FakeEventKitChangeObserver()
+        d.foregroundObserver = FakeForegroundObserver()
+        d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+        d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+        d.undoClock = undoClock
+        d.extractor = extractor
+        d.historyStore = history
+        d.correctionStore = corrections
+        d.screeningSettings = screeningSettings
+        d.apiKeyStore = FakeAPIKeyStore(key: screener == nil ? nil : "k")
+        d.makeScreener = { [screener] key in screener ?? JEVScreener(apiKey: key) }
+        d.auditRoll = { 1 }
+        d.bundlePath = "/nonexistent"
+    })
     return HistoryApp(
         model: model, signals: signals, history: history, corrections: corrections, correctionsPath: correctionsPath,
         taskSource: taskSource, undoClock: undoClock, screeningSettings: screeningSettings

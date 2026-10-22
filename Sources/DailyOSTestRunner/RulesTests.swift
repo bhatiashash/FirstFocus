@@ -129,17 +129,24 @@ func registerRulesTests(_ runner: TestRunner) {
                 let extractor = FakeIntentExtractor()
                 let rules = FakeRuleStore()
                 _ = try? rules.add("Shipping updates are never tasks")
-                let model = AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: []), signalStore: makeTestSignalStore(),
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-                    apiKeyStore: FakeAPIKeyStore(), ruleStore: rules, bundlePath: "/nonexistent"
-                )
+                let model = AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: [])
+                    d.signalStore = makeTestSignalStore()
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.ruleStore = rules
+                    d.bundlePath = "/nonexistent"
+                })
                 return RulesHarness(model: model, extractor: extractor, rules: rules)
             }
             await h.model.start()

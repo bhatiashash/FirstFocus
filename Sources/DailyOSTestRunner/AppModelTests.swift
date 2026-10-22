@@ -57,26 +57,26 @@ private func makeHarness(
     let extractor = FakeIntentExtractor(responses: [:])
     let historyStore = makeTestHistoryStore()
     let correctionStore = FakeCorrectionStore()
-    let model = AppModel(
-        taskSource: taskSource,
-        messagesSource: messagesSource,
-        signalStore: signalStore,
-        contactsResolver: FakeContactsResolver(),
-        settingsOpener: settingsOpener,
-        refreshClock: clock,
-        eventKitChanges: eventKitChanges,
-        foregroundObserver: foreground,
-        dayChanges: dayChanges,
-        zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-        focusListPreference: isolatedFocusListOff(), reExtractionSettings: reExtractionSettings,
-        undoClock: undoClock,
-        extractor: extractor,
-        historyStore: historyStore,
-        correctionStore: correctionStore,
-        apiKeyStore: FakeAPIKeyStore(),
+    let model = AppModel(AppDependencies.test { d in
+        d.taskSource = taskSource
+        d.messagesSource = messagesSource
+        d.signalStore = signalStore
+        d.contactsResolver = FakeContactsResolver()
+        d.settingsOpener = settingsOpener
+        d.refreshClock = clock
+        d.eventKitChanges = eventKitChanges
+        d.foregroundObserver = foreground
+        d.dayChanges = dayChanges
+        d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+        d.reExtractionSettings = reExtractionSettings
+        d.undoClock = undoClock
+        d.extractor = extractor
+        d.historyStore = historyStore
+        d.correctionStore = correctionStore
+        d.apiKeyStore = FakeAPIKeyStore()
         // Never fired, so only the triggers a test fires derive the list.
-        snoozeWakeClock: FakeUndoClock()
-    )
+        d.snoozeWakeClock = FakeUndoClock()
+    })
     return Harness(
         model: model, taskSource: taskSource, messagesSource: messagesSource, signalStore: signalStore,
         settingsOpener: settingsOpener, clock: clock, eventKitChanges: eventKitChanges, foreground: foreground,

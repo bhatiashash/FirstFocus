@@ -58,19 +58,27 @@ private func makeHarness(
         let messagesSource = FakeMessagesSource(messages: [])
         let clock = FakeNow(now)
         let snoozeWakeClock = FakeUndoClock()
-        let model = AppModel(
-            taskSource: taskSource,
-            messagesSource: messagesSource, signalStore: store,
-            contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-            refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-            foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
-            zenFocusModePreference: preference,
-            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-            undoClock: FakeUndoClock(),
-            extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-            apiKeyStore: FakeAPIKeyStore(), now: { clock.date }, bundlePath: "/nonexistent",
-            snoozeWakeClock: snoozeWakeClock
-        )
+        let model = AppModel(AppDependencies.test { d in
+            d.taskSource = taskSource
+            d.messagesSource = messagesSource
+            d.signalStore = store
+            d.contactsResolver = FakeContactsResolver()
+            d.settingsOpener = FakeSettingsOpener()
+            d.refreshClock = FakeRefreshClock()
+            d.eventKitChanges = FakeEventKitChangeObserver()
+            d.foregroundObserver = FakeForegroundObserver()
+            d.dayChanges = FakeDayChangeObserver()
+            d.zenFocusModePreference = preference
+            d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+            d.undoClock = FakeUndoClock()
+            d.extractor = FakeIntentExtractor()
+            d.historyStore = makeTestHistoryStore()
+            d.correctionStore = FakeCorrectionStore()
+            d.apiKeyStore = FakeAPIKeyStore()
+            d.now = { clock.date }
+            d.bundlePath = "/nonexistent"
+            d.snoozeWakeClock = snoozeWakeClock
+        })
         return Harness(
             model: model, taskSource: taskSource, messagesSource: messagesSource, store: store, clock: clock,
             snoozeWakeClock: snoozeWakeClock

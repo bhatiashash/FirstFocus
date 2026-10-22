@@ -19,17 +19,24 @@ private func makeHarness(suggestions: [Signal] = [], tasks: [ReminderTask] = [])
             try? store.recordOneMessageBatch(signal.sourceRef, signals: [signal])
         }
         let taskSource = FakeTaskSource(tasks: tasks, availability: .available)
-        let model = AppModel(
-            taskSource: taskSource,
-            messagesSource: FakeMessagesSource(messages: []), signalStore: store,
-            contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-            refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-            foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
-            zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-            extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-            apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-        )
+        let model = AppModel(AppDependencies.test { d in
+            d.taskSource = taskSource
+            d.messagesSource = FakeMessagesSource(messages: [])
+            d.signalStore = store
+            d.contactsResolver = FakeContactsResolver()
+            d.settingsOpener = FakeSettingsOpener()
+            d.refreshClock = FakeRefreshClock()
+            d.eventKitChanges = FakeEventKitChangeObserver()
+            d.foregroundObserver = FakeForegroundObserver()
+            d.dayChanges = FakeDayChangeObserver()
+            d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+            d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+            d.extractor = FakeIntentExtractor()
+            d.historyStore = makeTestHistoryStore()
+            d.correctionStore = FakeCorrectionStore()
+            d.apiKeyStore = FakeAPIKeyStore()
+            d.bundlePath = "/nonexistent"
+        })
         return Harness(model: model, taskSource: taskSource)
     }
 }

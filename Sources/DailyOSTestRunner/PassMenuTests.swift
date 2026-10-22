@@ -28,17 +28,24 @@ private func makeModel(extractor: GatedIntentExtractor, m1AlreadyProcessed: Bool
             chatId: 1, sourceRef: "b\(index)", inputText: "x", correctedOutput: "NONE", correctionType: .falsePositive
         ))
     }
-    return AppModel(
-        taskSource: FakeTaskSource(tasks: [], availability: .available),
-        messagesSource: FakeMessagesSource(messages: [message(id: "m1", text: "call the dentist")]), signalStore: store,
-        contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-        refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-        foregroundObserver: FakeForegroundObserver(),
-        zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-        focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-        extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: corrections,
-        screeningSettings: screeningOn(defaults), apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-    )
+    return AppModel(AppDependencies.test { d in
+        d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+        d.messagesSource = FakeMessagesSource(messages: [message(id: "m1", text: "call the dentist")])
+        d.signalStore = store
+        d.contactsResolver = FakeContactsResolver()
+        d.settingsOpener = FakeSettingsOpener()
+        d.refreshClock = FakeRefreshClock()
+        d.eventKitChanges = FakeEventKitChangeObserver()
+        d.foregroundObserver = FakeForegroundObserver()
+        d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+        d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+        d.extractor = extractor
+        d.historyStore = makeTestHistoryStore()
+        d.correctionStore = corrections
+        d.screeningSettings = screeningOn(defaults)
+        d.apiKeyStore = FakeAPIKeyStore()
+        d.bundlePath = "/nonexistent"
+    })
 }
 
 /// The Screening toggle on, so History offers "This was work".

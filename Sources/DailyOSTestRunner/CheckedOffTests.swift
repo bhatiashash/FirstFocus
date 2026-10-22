@@ -34,18 +34,26 @@ private func makeHarness(
         let undoClock = FakeUndoClock()
         let dayChanges = FakeDayChangeObserver()
         let clock = FakeNow(now)
-        let model = AppModel(
-            taskSource: taskSource,
-            messagesSource: FakeMessagesSource(messages: [], availability: messages), signalStore: store,
-            contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-            refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-            foregroundObserver: FakeForegroundObserver(), dayChanges: dayChanges,
-            zenFocusModePreference: preference,
-            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-            undoClock: undoClock,
-            extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-            apiKeyStore: FakeAPIKeyStore(), now: { clock.date }, bundlePath: "/nonexistent"
-        )
+        let model = AppModel(AppDependencies.test { d in
+            d.taskSource = taskSource
+            d.messagesSource = FakeMessagesSource(messages: [], availability: messages)
+            d.signalStore = store
+            d.contactsResolver = FakeContactsResolver()
+            d.settingsOpener = FakeSettingsOpener()
+            d.refreshClock = FakeRefreshClock()
+            d.eventKitChanges = FakeEventKitChangeObserver()
+            d.foregroundObserver = FakeForegroundObserver()
+            d.dayChanges = dayChanges
+            d.zenFocusModePreference = preference
+            d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+            d.undoClock = undoClock
+            d.extractor = FakeIntentExtractor()
+            d.historyStore = makeTestHistoryStore()
+            d.correctionStore = FakeCorrectionStore()
+            d.apiKeyStore = FakeAPIKeyStore()
+            d.now = { clock.date }
+            d.bundlePath = "/nonexistent"
+        })
         return Harness(model: model, taskSource: taskSource, store: store, undoClock: undoClock, dayChanges: dayChanges, clock: clock)
     }
 }

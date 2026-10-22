@@ -237,45 +237,32 @@ app.delegate = appDelegate
 }
 app.mainMenu = makeMainMenu()
 
-// Constructed once and shared with the view models below, not two
-// separately-constructed instances that only happen to agree today
-// because both default to `UserDefaults.standard` — one instance is what
-// actually guarantees the unified window's Advanced destination and the
-// extractor it reloads are reading and writing the same store.
-let extractionSettings = ExtractionSettings()
-// Same reasoning as extractionSettings above: one shared instance, read by
-// both AppModel (reExtract/canReExtract) and Advanced's Steppers.
-let reExtractionSettings = ReExtractionSettings()
-// History (ADR 0029): one shared instance so the extraction pipeline's
-// writes and the History destination's reads hit the same SQLite table —
-// the same "one instance, not two that happen to agree" reasoning as the
-// two above.
-let historyStore = SQLiteHistoryStore(path: SQLiteHistoryStore.defaultPath(bundleIdentifier: bundleIdentifier))
-// The Models destination's download seam (ADR 0028). Unlike the three
-// stores above, nothing but the Models view ever touches this — it never
-// needs to reach AppModel.
-let modelDownloader = URLSessionModelDownloader()
-
-// Screening (ADR 0036): one settings wrapper and one Keychain-backed key
-// store, shared by AppModel (which builds the Screener) and Advanced's
-// Screening section (which edits them).
-let screeningSettings = ScreeningSettings()
-let apiKeyStore = KeychainAPIKeyStore(service: bundleIdentifier)
-// Rules (ADR 0038): shared by AppModel (which hands them to the extractor)
-// and Advanced's Rules section (which edits them).
-let ruleStore = SQLiteRuleStore(path: SQLiteRuleStore.defaultPath(bundleIdentifier: bundleIdentifier))
-
-let model = AppModel(
+// Every store and setting AppModel uses, built once (AppDependencies.live).
+// The view models below take the same instances from it rather than
+// building their own: one instance, not two that happen to agree because
+// both read `UserDefaults.standard` or the same SQLite file.
+let dependencies = AppDependencies.live(
     settingsOpener: NSWorkspaceSettingsOpener(),
-    messagesChanges: FSEventsMessagesChangeObserver(directory: liveMessagesDirectory),
     foregroundObserver: NSApplicationForegroundObserver(),
-    extractionSettings: extractionSettings,
-    reExtractionSettings: reExtractionSettings,
-    historyStore: historyStore,
-    screeningSettings: screeningSettings,
-    apiKeyStore: apiKeyStore,
-    ruleStore: ruleStore
+    messagesChanges: FSEventsMessagesChangeObserver(directory: liveMessagesDirectory)
 )
+let extractionSettings = dependencies.extractionSettings
+let reExtractionSettings = dependencies.reExtractionSettings
+// History (ADR 0029): the extraction pipeline's writes and the History
+// destination's reads hit the same table.
+let historyStore = dependencies.historyStore
+// The Models destination's download seam (ADR 0028). Nothing but the
+// Models view touches it, so it never reaches AppModel.
+let modelDownloader = URLSessionModelDownloader()
+// Screening (ADR 0036): AppModel builds the Screener; Advanced's Screening
+// section edits the settings and the key.
+let screeningSettings = dependencies.screeningSettings
+let apiKeyStore = dependencies.apiKeyStore
+// Rules (ADR 0038): AppModel hands them to the extractor; Advanced's
+// Rules section edits them.
+let ruleStore = dependencies.ruleStore
+
+let model = AppModel(dependencies)
 appDelegate.beforeQuit = { model.prepareToQuit() }
 
 // unified-window-and-minimal-view: built once, alongside `model`, rather
@@ -293,7 +280,7 @@ let rulesViewModel = RulesViewModel(store: ruleStore, app: model, proposer: mode
 let mutedChatsViewModel = MutedChatsViewModel(actions: model.historyActions, historyStore: historyStore)
 let screeningViewModel = ScreeningSettingsViewModel(
     settings: screeningSettings, keyStore: apiKeyStore, app: model, historyStore: historyStore,
-    correctionLog: SQLiteCorrectionStore(path: SQLiteCorrectionStore.defaultPath(bundleIdentifier: bundleIdentifier))
+    correctionLog: dependencies.correctionStore
 )
 // Morning Brief (ADR 0046): one preference and one delivery, shared by
 // Advanced's section and the daily send.

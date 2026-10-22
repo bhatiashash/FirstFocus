@@ -34,18 +34,25 @@ private func makeHarness(messages: [ChatMessage], responses: [String: String]) a
         let screening = ScreeningSettings(defaults: defaults)
         screening.isEnabled = true
         let screener = FakeScreener(probability: 0.9)
-        let model = AppModel(
-            taskSource: FakeTaskSource(tasks: [], availability: .available),
-            messagesSource: FakeMessagesSource(messages: messages), signalStore: signals,
-            contactsResolver: FakeContactsResolver(names: [priya: "Priya"]), settingsOpener: FakeSettingsOpener(),
-            refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-            foregroundObserver: FakeForegroundObserver(),
-            zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-            extractor: FakeIntentExtractor(responses: responses), historyStore: history,
-            correctionStore: FakeCorrectionStore(), screeningSettings: screening, apiKeyStore: FakeAPIKeyStore(key: "k"),
-            makeScreener: { _ in screener }, bundlePath: "/nonexistent"
-        )
+        let model = AppModel(AppDependencies.test { d in
+            d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+            d.messagesSource = FakeMessagesSource(messages: messages)
+            d.signalStore = signals
+            d.contactsResolver = FakeContactsResolver(names: [priya: "Priya"])
+            d.settingsOpener = FakeSettingsOpener()
+            d.refreshClock = FakeRefreshClock()
+            d.eventKitChanges = FakeEventKitChangeObserver()
+            d.foregroundObserver = FakeForegroundObserver()
+            d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+            d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+            d.extractor = FakeIntentExtractor(responses: responses)
+            d.historyStore = history
+            d.correctionStore = FakeCorrectionStore()
+            d.screeningSettings = screening
+            d.apiKeyStore = FakeAPIKeyStore(key: "k")
+            d.makeScreener = { _ in screener }
+            d.bundlePath = "/nonexistent"
+        })
         return Harness(model: model, signals: signals, history: history)
     }
 }

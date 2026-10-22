@@ -37,17 +37,24 @@ func registerReviewFixTests(_ runner: TestRunner) {
                 }
                 let extractor = ThrowingFreeTextExtractor()
                 let rules = FakeRuleStore()
-                let model = AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: []), signalStore: makeTestSignalStore(),
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: corrections,
-                    apiKeyStore: FakeAPIKeyStore(), ruleStore: rules, bundlePath: "/nonexistent"
-                )
+                let model = AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: [])
+                    d.signalStore = makeTestSignalStore()
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = corrections
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.ruleStore = rules
+                    d.bundlePath = "/nonexistent"
+                })
                 return Harness(model: model, extractor: extractor, corrections: corrections, rules: rules)
             }
             await h.model.start()

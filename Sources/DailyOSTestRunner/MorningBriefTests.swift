@@ -184,20 +184,28 @@ func registerMorningBriefTests(_ runner: TestRunner) {
             let clock = await MainActor.run { TestNow(now.addingTimeInterval(-60)) }
             let store = makeTestSignalStore()
             let model = await MainActor.run {
-                AppModel(
-                    taskSource: FakeTaskSource(tasks: [
+                AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [
                         ReminderTask(id: "r1", title: "Pay rent", dueAt: nil, priority: .high, createdAt: now),
-                    ]),
-                    messagesSource: FakeMessagesSource(messages: []), signalStore: store,
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: morningBriefDefaults()),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
-                    extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(), apiKeyStore: FakeAPIKeyStore(), now: { clock.date },
-                    bundlePath: "/nonexistent", snoozeWakeClock: FakeUndoClock()
-                )
+                    ])
+                    d.messagesSource = FakeMessagesSource(messages: [])
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.dayChanges = FakeDayChangeObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: morningBriefDefaults())
+                    d.reExtractionSettings = ReExtractionSettings(defaults: morningBriefDefaults())
+                    d.extractor = FakeIntentExtractor()
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.now = { clock.date }
+                    d.bundlePath = "/nonexistent"
+                    d.snoozeWakeClock = FakeUndoClock()
+                })
             }
             try store.snooze(signalId: "r1", until: now)
             await model.reload()
@@ -212,20 +220,27 @@ func registerMorningBriefTests(_ runner: TestRunner) {
             let store = makeTestSignalStore()
             try store.markBackfillComplete()
             let model = await MainActor.run {
-                AppModel(
-                    taskSource: FakeTaskSource(tasks: [
+                AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [
                         ReminderTask(id: "r1", title: "Pay rent", dueAt: nil, priority: .high, createdAt: now),
-                    ]),
-                    messagesSource: FakeMessagesSource(messages: []), signalStore: store,
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: morningBriefDefaults()),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
-                    extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(), apiKeyStore: FakeAPIKeyStore(),
-                    bundlePath: "/nonexistent", snoozeWakeClock: FakeUndoClock()
-                )
+                    ])
+                    d.messagesSource = FakeMessagesSource(messages: [])
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.dayChanges = FakeDayChangeObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: morningBriefDefaults())
+                    d.reExtractionSettings = ReExtractionSettings(defaults: morningBriefDefaults())
+                    d.extractor = FakeIntentExtractor()
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.bundlePath = "/nonexistent"
+                    d.snoozeWakeClock = FakeUndoClock()
+                })
             }
             let seen = await MainActor.run { () -> Box in
                 let seen = Box()

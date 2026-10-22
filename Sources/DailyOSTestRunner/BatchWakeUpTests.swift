@@ -121,17 +121,24 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
                 let defaults = UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!
                 let store = makeTestSignalStore()
                 try? store.markBackfillComplete()
-                return AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: source, signalStore: store,
-                    contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
-                    apiKeyStore: FakeAPIKeyStore(), batchWakeClock: clock, bundlePath: "/nonexistent"
-                )
+                return AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = source
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.batchWakeClock = clock
+                    d.bundlePath = "/nonexistent"
+                })
             }
             await model.start()
             try expect(extractor.calls.isEmpty)

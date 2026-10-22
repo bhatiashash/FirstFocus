@@ -135,22 +135,30 @@ func registerLiveScreeningTests(_ runner: TestRunner) {
                     "[context]\nParticipant A: are you around saturday\n\n[latest messages]\nParticipant A: can you book the flights": "Book the flights",
                 ])
                 let screener = FakeScreener(probability: 0.1)
-                let model = AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: [
+                let model = AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: [
                         ChatMessage(id: "m0", chatId: 3, isFromMe: false, text: "are you around saturday",
                                     createdAt: Date().addingTimeInterval(-60), senderAddress: "+15550001111"),
                         received("m1", chatId: 3, text: "can you book the flights"),
-                    ]),
-                    signalStore: store, contactsResolver: FakeContactsResolver(),
-                    settingsOpener: FakeSettingsOpener(), refreshClock: FakeRefreshClock(),
-                    eventKitChanges: FakeEventKitChangeObserver(), foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: corrections,
-                    screeningSettings: settings, apiKeyStore: FakeAPIKeyStore(key: "tsk-1"), makeScreener: { _ in screener },
-                    auditRoll: { 1 }, bundlePath: "/nonexistent"
-                )
+                    ])
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = corrections
+                    d.screeningSettings = settings
+                    d.apiKeyStore = FakeAPIKeyStore(key: "tsk-1")
+                    d.makeScreener = { _ in screener }
+                    d.auditRoll = { 1 }
+                    d.bundlePath = "/nonexistent"
+                })
                 return LiveHarness(model: model, store: store, corrections: corrections, extractor: extractor, screener: screener)
             }
             await h.model.start()

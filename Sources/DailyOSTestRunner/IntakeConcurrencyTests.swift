@@ -170,22 +170,23 @@ func registerIntakeConcurrencyTests(_ runner: TestRunner) {
             let h = await MainActor.run { () -> PollHarness in
                 let defaults = UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!
                 let clock = FakeRefreshClock()
-                let model = AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: messages),
-                    signalStore: makeTestSignalStore(),
-                    contactsResolver: FakeContactsResolver(),
-                    settingsOpener: FakeSettingsOpener(),
-                    refreshClock: clock,
-                    eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor,
-                    historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(),
-                    apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-                )
+                let model = AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: messages)
+                    d.signalStore = makeTestSignalStore()
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = clock
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.bundlePath = "/nonexistent"
+                })
                 return PollHarness(model: model, clock: clock)
             }
 
@@ -219,22 +220,23 @@ func registerIntakeConcurrencyTests(_ runner: TestRunner) {
                 // Backfill already done, so `backfillProgress` stays nil and
                 // the running pass is the only thing this can be measuring.
                 try store.markBackfillComplete()
-                return AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: [message(id: "m1", chatId: 1, text: "call the dentist")]),
-                    signalStore: store,
-                    contactsResolver: FakeContactsResolver(),
-                    settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(),
-                    eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor,
-                    historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(),
-                    apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-                )
+                return AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: [message(id: "m1", chatId: 1, text: "call the dentist")])
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.bundlePath = "/nonexistent"
+                })
             }
 
             let launch = Task { await model.start() }
@@ -270,22 +272,23 @@ func registerIntakeConcurrencyTests(_ runner: TestRunner) {
                 let store = makeTestSignalStore()
                 try store.recordOneMessageBatch("old-1", signals: [stored])
                 try store.markBackfillComplete()
-                return AppModel(
-                    taskSource: FakeTaskSource(tasks: [], availability: .available),
-                    messagesSource: FakeMessagesSource(messages: [message(id: "m1", chatId: 1, text: "book the flights")]),
-                    signalStore: store,
-                    contactsResolver: FakeContactsResolver(),
-                    settingsOpener: FakeSettingsOpener(),
-                    refreshClock: FakeRefreshClock(),
-                    eventKitChanges: FakeEventKitChangeObserver(),
-                    foregroundObserver: FakeForegroundObserver(),
-                    zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
-                    extractor: extractor,
-                    historyStore: makeTestHistoryStore(),
-                    correctionStore: FakeCorrectionStore(),
-                    apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
-                )
+                return AppModel(AppDependencies.test { d in
+                    d.taskSource = FakeTaskSource(tasks: [], availability: .available)
+                    d.messagesSource = FakeMessagesSource(messages: [message(id: "m1", chatId: 1, text: "book the flights")])
+                    d.signalStore = store
+                    d.contactsResolver = FakeContactsResolver()
+                    d.settingsOpener = FakeSettingsOpener()
+                    d.refreshClock = FakeRefreshClock()
+                    d.eventKitChanges = FakeEventKitChangeObserver()
+                    d.foregroundObserver = FakeForegroundObserver()
+                    d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
+                    d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
+                    d.extractor = extractor
+                    d.historyStore = makeTestHistoryStore()
+                    d.correctionStore = FakeCorrectionStore()
+                    d.apiKeyStore = FakeAPIKeyStore()
+                    d.bundlePath = "/nonexistent"
+                })
             }
 
             // Never opened: the pass stays stuck in the model for the whole

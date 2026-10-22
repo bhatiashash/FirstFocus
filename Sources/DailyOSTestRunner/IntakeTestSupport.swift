@@ -199,11 +199,3 @@ func reExtractThroughIntake(
         priority: priority, onProgress: onProgress
     )
 }
-
-/// A Focus list setting of its own, turned off, so an `AppModel` test
-/// never syncs a Focus list or touches the runner's shared defaults.
-func isolatedFocusListOff() -> FocusListPreference {
-    let preference = FocusListPreference(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
-    preference.isEnabled = false
-    return preference
-}
