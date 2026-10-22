@@ -47,10 +47,10 @@ States, in order of precedence: "Reading your self-thread… n of m" (first-run 
 
 | Section | Header control | Contents |
 |---|---|---|
-| Suggested | Chevron collapses / expands | Inferred Signals waiting for Approve or Dismiss. |
+| Suggested | Chevron collapses / expands; starts expanded | Inferred Signals waiting for Approve or Dismiss. Collapsing it drops keyboard focus and closes any preview. |
 | Focus | None; takes drops | Overdue, has a Priority, or due today or tomorrow. Ordered by any order you dragged, then dated rows (most overdue first, then soonest), then undated rows by Priority, then newest. When empty but Later has rows: a dashed "Drag a task here to move it into Focus." drop zone (not in Zen). |
-| Later | Chevron collapses / expands; takes drops, even collapsed | Everything else. Rows due after tomorrow come first, soonest first, then undated rows, newest first. A dated row moves into Focus by itself the day before it's due. |
-| Snoozed | "Snoozed (N)" · chevron collapses / expands; starts collapsed; takes no drops; not in Zen | Snoozed rows, soonest to return first. Their rows don't count toward Later's cap. |
+| Later | Chevron collapses / expands; starts expanded; opens when a reminder you add lands in it; takes drops, even collapsed | Everything else. Rows due after tomorrow come first, soonest first, then undated rows, newest first. A dated row moves into Focus by itself the day before it's due. |
+| Snoozed | "Snoozed (N)" · chevron collapses / expands; starts collapsed (collapse state is not saved between launches); takes no drops; not in Zen | Snoozed rows, soonest to return first. Their rows don't count toward Later's cap. |
 | Notice: Messages | None | "Full Disk Access is needed…" · Open System Settings · Retry. |
 | Notice: Reminders | None | "Reminders access is needed…" · Open System Settings · Retry. |
 | Notice: Extraction | None | "The local extraction model failed to load…" · Retry. |
@@ -81,7 +81,7 @@ States, in order of precedence: "Reading your self-thread… n of m" (first-run 
 | "Inferred" chip (hover) | Static. |
 | Source icon (inferred only) | Tooltip names the source and sender. |
 | `xmark` (hover, Messages only) | Dismiss. |
-| Due date | Red when overdue. Nothing is drawn when there's no date and a sender pill, so those rows stay the normal height. |
+| Due date | Red when overdue: a date with no time once its day has ended, a date with a time once that time has passed, judged when the list was last worked out. The Morning Brief marks "(overdue)" by the same rule. Nothing is drawn when there's no date and a sender pill, so those rows stay the normal height. |
 | Sender pill (blue) | Static. |
 | Click row (only with the glyph) | Opens or closes the Notes drawer under the row; opening another row's closes this one. Instant under Reduce Motion. A row without the glyph ignores the click. In Zen, the window grows to fit an open drawer (up to Zen's usual maximum) and shrinks back when it closes. |
 | Drawer: Notes | The reminder's Notes (for an approved Suggestion, the whole Batch with names), or a Messages Signal's original wording. Read-only; selectable. |
@@ -120,7 +120,7 @@ Nothing else: no drag, drop, snooze, right-click menu, Notes drawer or Sender pi
 
 **Inline "New Reminder" field** (under the Focus header, after `+`): see the toolbar's `+`.
 
-**Keyboard** (Suggested only, once a Suggestion has focus): ↑ ↓ move · ⏎ Approve · ⌫ Dismiss · Space preview · Esc close preview.
+**Keyboard** (Suggested only, once a Suggestion has focus, and never while Suggested is collapsed): ↑ ↓ move · ⏎ Approve · ⌫ Dismiss · Space preview · Esc close preview.
 
 ## History
 

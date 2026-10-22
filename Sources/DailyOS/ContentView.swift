@@ -46,17 +46,8 @@ struct ContentView: View {
     /// The one Focus or Later row whose Notes drawer is open, if any.
     /// Opening another row closes this one.
     @State private var expandedRowId: String?
-    @State private var isSuggestedCollapsed = false
-    /// The Snoozed Section starts collapsed (ADR 0045): it holds what you
-    /// chose not to see yet.
-    @State private var isSnoozedCollapsed = true
-    /// Collapsible per Tier, but only ever holds `.later` in
-    /// practice — Focus has no chevron and can't be collapsed, on purpose:
-    /// this is a "what should I work on next" tool, and letting its one
-    /// unmissable tier hide itself away would undercut the point. Later
-    /// and Suggested collapsing is exactly what keeps the viewport on
-    /// Focus when either grows long.
-    @State private var collapsedTiers: Set<Tier> = []
+    // Which Sections are collapsed is AppModel's (`collapsedSections`), so
+    // the Inbox's keys can tell when its rows are hidden.
 
     /// Apple's default UI spring — critically damped, no overshoot — for
     /// list reordering and row removal. Reduce Motion gets a short
@@ -314,13 +305,13 @@ struct ContentView: View {
         ForEach(model.sections) { section in
             switch section {
             case .suggested(let suggestedSignals):
-                SectionHeaderText("Suggested", isCollapsed: isSuggestedCollapsed) {
-                    isSuggestedCollapsed.toggle()
+                SectionHeaderText("Suggested", isCollapsed: model.isCollapsed(.inbox)) {
+                    model.toggleCollapse(.inbox)
                 }
                 .padding(.top, sectionHeaderTopPadding)
                 .listRowSeparator(.hidden)
                 .listRowInsets(rowHorizontalInset)
-                if !isSuggestedCollapsed {
+                if !model.isCollapsed(.inbox) {
                     ForEach(suggestedSignals) { signal in
                         SuggestedSignalRow(
                             signal: signal,
@@ -347,8 +338,8 @@ struct ContentView: View {
             case .tier(let tier, let groups):
                 Group {
                     if tier == .later {
-                        SectionHeaderText(tier.header, isCollapsed: collapsedTiers.contains(tier)) {
-                            toggleCollapse(tier)
+                        SectionHeaderText(tier.header, isCollapsed: model.isCollapsed(.later)) {
+                            model.toggleCollapse(.later)
                         }
                     } else {
                         SectionHeaderText(tier.header)
@@ -377,18 +368,18 @@ struct ContentView: View {
                     EmptyFocusDropZone { draggedId in Task { await model.drop(draggedId, onto: .tier(.focus)) } }
                         .listRowSeparator(.hidden)
                         .listRowInsets(rowHorizontalInset)
-                } else if !collapsedTiers.contains(tier) {
+                } else if !(tier == .later && model.isCollapsed(.later)) {
                     signalRows(for: groups)
                 }
             case .snoozed(let snoozedSignals):
                 // Takes no drops: nothing is dragged into or out of it.
-                SectionHeaderText("Snoozed (\(snoozedSignals.count))", isCollapsed: isSnoozedCollapsed) {
-                    isSnoozedCollapsed.toggle()
+                SectionHeaderText("Snoozed (\(snoozedSignals.count))", isCollapsed: model.isCollapsed(.snoozed)) {
+                    model.toggleCollapse(.snoozed)
                 }
                 .padding(.top, sectionHeaderTopPadding)
                 .listRowSeparator(.hidden)
                 .listRowInsets(rowHorizontalInset)
-                if !isSnoozedCollapsed {
+                if !model.isCollapsed(.snoozed) {
                     ForEach(snoozedSignals) { signal in
                         signalRow(for: signal, groupPosition: nil)
                     }
@@ -469,6 +460,7 @@ struct ContentView: View {
         SignalRow(
             signal: signal,
             affordances: model.affordances(for: signal),
+            isOverdue: model.isOverdue(signal),
             drawer: rowDrawer(for: signal),
             isExpanded: expandedRowId == signal.id,
             perform: { action in perform(action, on: signal) },
@@ -516,21 +508,9 @@ struct ContentView: View {
     }
 
     /// The `+` field's Return. Where the reminder lands is `AppModel`'s
-    /// call; Later opens when that's where it went.
+    /// call, and so is opening Later when that's where it went.
     private func addReminder(title: String, dueAt: Date?) {
-        Task {
-            if await model.addReminder(title: title, dueAt: dueAt) == .later {
-                collapsedTiers.remove(.later)
-            }
-        }
-    }
-
-    private func toggleCollapse(_ tier: Tier) {
-        if collapsedTiers.contains(tier) {
-            collapsedTiers.remove(tier)
-        } else {
-            collapsedTiers.insert(tier)
-        }
+        Task { _ = await model.addReminder(title: title, dueAt: dueAt) }
     }
 
 }
@@ -874,6 +854,9 @@ struct SignalRow: View {
     /// here: every row offers both unconditionally, so there's nothing to
     /// decide about them.
     let affordances: SignalAffordances
+    /// Whether its due date draws as overdue, decided by `AppModel` against
+    /// the moment the list was ranked.
+    let isOverdue: Bool
     /// What the row shows and what its drawer holds, decided by
     /// `rowDrawer(for:)` (DailyOSCore).
     let drawer: RowDrawer
@@ -1146,12 +1129,12 @@ struct SignalRow: View {
                         Chip(text: snoozeReturnText(until), color: .secondary)
                             .fixedSize()
                         if signal.dueAt != nil {
-                            DueDateText(dueAt: signal.dueAt)
+                            DueDateText(dueAt: signal.dueAt, isOverdue: isOverdue)
                         }
                     }
                     .frame(minWidth: dueDateColumnWidth, alignment: .trailing)
                 } else if signal.dueAt != nil || signal.sender == nil {
-                    DueDateText(dueAt: signal.dueAt)
+                    DueDateText(dueAt: signal.dueAt, isOverdue: isOverdue)
                 }
                 // Sender-on-approval: `signal.sender` is non-nil here only
                 // for a reminder approved from a Messages Signal with a
@@ -1451,11 +1434,11 @@ private let dueDateColumnWidth: CGFloat = 64
 
 private struct DueDateText: View {
     let dueAt: Date?
+    let isOverdue: Bool
 
     var body: some View {
         Group {
             if let dueAt {
-                let isOverdue = dueAt < Date()
                 Text(relativeDueDateText(dueAt))
                     // Single line, sized to its own text: without this, a
                     // longer relative-date phrase ("3 weeks ago") wrapped

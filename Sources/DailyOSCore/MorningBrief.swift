@@ -45,16 +45,15 @@ public struct MorningBriefFormat: Equatable, Sendable {
 
 /// The Morning Brief's text (ADR 0046): the fixed header, a blank line,
 /// then `format`'s body. The Suggested Tasks Inbox and the Snoozed Section
-/// are left out. A Signal due before `now`'s day is marked overdue; one
-/// due today is not, since being in Focus already says so. A body line
+/// are left out. A Signal whose due date has passed at `now` is marked
+/// overdue, by the same rule the window uses (`isOverdue`). A body line
 /// holding only a placeholder that comes out empty is dropped, so an
 /// uncut list leaves no blank line where `{more}` was.
 public func composeMorningBrief(_ list: RankedList, now: Date, format: MorningBriefFormat = .standard) -> String {
-    let startOfToday = Calendar.current.startOfDay(for: now)
     let listed = format.limit.map { Array(list.focus.prefix(max($0, 0))) } ?? list.focus
     func line(_ template: String, _ signal: Signal, _ position: Int) -> String {
-        let isOverdue = signal.dueAt.map { $0 < startOfToday } ?? false
-        return fill(template, ["n": String(position), "label": signal.label, "overdue": isOverdue ? " (overdue)" : ""])
+        let overdue = signal.dueAt.map { isOverdue($0, at: now) } ?? false
+        return fill(template, ["n": String(position), "label": signal.label, "overdue": overdue ? " (overdue)" : ""])
     }
     let unlisted = list.focus.count - listed.count
     let values = [

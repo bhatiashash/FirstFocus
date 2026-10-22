@@ -99,6 +99,7 @@ registerOpenAtLoginTests(runner)
 registerFocusListTests(runner)
 registerExtractionFailureTests(runner)
 registerSnoozeLifecycleTests(runner)
+registerViewDecisionsTests(runner)
 
 let status = runner.summarize()
 removeTestStores()

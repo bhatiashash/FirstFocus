@@ -125,6 +125,11 @@ public final class AppModel: ObservableObject {
     /// 08), or `nil` when nothing is focused. Cleared whenever that
     /// Suggestion leaves the Inbox by any route.
     @Published public var focusedSuggestionId: String?
+    /// Which Sections are collapsed (CONTEXT.md: Section). The Snoozed
+    /// Section starts collapsed (ADR 0045); the Suggested Tasks Inbox and
+    /// Later start expanded. Not saved between launches. Focus never
+    /// collapses.
+    @Published public private(set) var collapsedSections: Set<CollapsibleSection> = [.snoozed]
     /// The Suggestion whose context popover is open (batched-extraction
     /// ticket 09), or `nil`. Cleared, like focus, once it leaves the Inbox.
     @Published public var previewedSuggestionId: String?
@@ -1001,6 +1006,30 @@ public final class AppModel: ObservableObject {
         return DailyOSCore.affordances(for: signal, isLater: row(signal.id)?.tier == .later, now: rankedAt)
     }
 
+    /// Whether `section` is collapsed.
+    public func isCollapsed(_ section: CollapsibleSection) -> Bool {
+        collapsedSections.contains(section)
+    }
+
+    /// A Section header's chevron. Collapsing the Inbox drops keyboard
+    /// focus and any open preview, since its keys do nothing while it is
+    /// collapsed: none of them may act on a row you can't see.
+    public func toggleCollapse(_ section: CollapsibleSection) {
+        if collapsedSections.remove(section) == nil {
+            collapsedSections.insert(section)
+            if section == .inbox {
+                focusedSuggestionId = nil
+                previewedSuggestionId = nil
+            }
+        }
+    }
+
+    /// Whether `signal`'s due date draws as overdue, judged against
+    /// `rankedAt` like its Tier.
+    public func isOverdue(_ signal: Signal) -> Bool {
+        signal.dueAt.map { DailyOSCore.isOverdue($0, at: rankedAt) } ?? false
+    }
+
     /// The Focus or Later row with `id` in the list on screen, and its Tier.
     private func row(_ id: String) -> (signal: Signal, tier: Tier)? {
         if let signal = rankedList.focus.first(where: { $0.id == id }) { return (signal, .focus) }
@@ -1060,7 +1089,7 @@ public final class AppModel: ObservableObject {
     /// in its own task.
     @discardableResult
     public func pressInboxKey(_ key: InboxKey) -> Bool {
-        guard !isZenFocusModeEnabled, !rankedList.suggested.isEmpty else { return false }
+        guard !isZenFocusModeEnabled, !isCollapsed(.inbox), !rankedList.suggested.isEmpty else { return false }
         switch key {
         case .approve, .dismiss, .togglePreview:
             guard focusedSuggestionId != nil else { return false }
@@ -1079,7 +1108,7 @@ public final class AppModel: ObservableObject {
     /// keystroke acts on the next row. The tier an Approved Signal lands
     /// in is left to the usual rules (ADR 0002).
     public func handleInboxKey(_ key: InboxKey) async {
-        guard !isZenFocusModeEnabled else { return }
+        guard !isZenFocusModeEnabled, !isCollapsed(.inbox) else { return }
         let ids = rankedList.suggested.map(\.id)
         // Read before acting: dismissing the previewed row clears it.
         let wasPreviewing = previewedSuggestionId != nil
@@ -1159,6 +1188,8 @@ public final class AppModel: ObservableObject {
         }
         republish()
         if let added = rankedList.later.first(where: { $0.id == id }) {
+            // Later opens, so the new row shows where it went.
+            collapsedSections.remove(.later)
             reportAddedToLater(added.label)
             return .later
         }
@@ -1293,4 +1324,11 @@ private func decideSections(
         result.append(.notice(.extractionUnavailable))
     }
     return result
+}
+
+/// A Section that can be collapsed from its header.
+public enum CollapsibleSection: Hashable, Sendable {
+    case inbox
+    case later
+    case snoozed
 }

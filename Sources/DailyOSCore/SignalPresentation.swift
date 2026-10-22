@@ -83,6 +83,18 @@ public func shorteningURLs(in text: String) -> String {
     return result
 }
 
+/// Whether a due date has passed at `moment`, the one rule the window and
+/// the Morning Brief share. A date with no time, stored at the start of
+/// its day (ADR 0030), is overdue once that day has ended; a date with a
+/// time is overdue once the time has passed. Callers pass the moment the
+/// Ranked List was ranked against, so a row and its Tier agree.
+public func isOverdue(_ dueAt: Date, at moment: Date, calendar: Calendar = .current) -> Bool {
+    if calendar.startOfDay(for: dueAt) == dueAt {
+        return dueAt < calendar.startOfDay(for: moment)
+    }
+    return dueAt < moment
+}
+
 /// "Today"/"Tomorrow"/"Yesterday" for anything near enough to name, a
 /// general relative phrase ("in 3 days", capitalized) otherwise — a hard
 /// calendar date is rarely what you actually want to read here.
