@@ -146,7 +146,7 @@ func registerLiveScreeningTests(_ runner: TestRunner) {
                     settingsOpener: FakeSettingsOpener(), refreshClock: FakeRefreshClock(),
                     eventKitChanges: FakeEventKitChangeObserver(), foregroundObserver: FakeForegroundObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    reExtractionSettings: ReExtractionSettings(defaults: defaults),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
                     extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: corrections,
                     screeningSettings: settings, apiKeyStore: FakeAPIKeyStore(key: "tsk-1"), makeScreener: { _ in screener },
                     auditRoll: { 1 }, bundlePath: "/nonexistent"

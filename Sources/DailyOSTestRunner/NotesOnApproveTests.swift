@@ -26,7 +26,7 @@ private func makeHarness(suggestions: [Signal] = [], tasks: [ReminderTask] = [])
             refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
             foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
             zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-            reExtractionSettings: ReExtractionSettings(defaults: defaults),
+            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
             extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
             apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
         )

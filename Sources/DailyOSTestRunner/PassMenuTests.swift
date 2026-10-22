@@ -35,7 +35,7 @@ private func makeModel(extractor: GatedIntentExtractor, m1AlreadyProcessed: Bool
         refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
         foregroundObserver: FakeForegroundObserver(),
         zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-        reExtractionSettings: ReExtractionSettings(defaults: defaults),
+        focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
         extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: corrections,
         screeningSettings: screeningOn(defaults), apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
     )

@@ -16,10 +16,14 @@ public struct ReminderTask: Equatable, Sendable {
     /// The reminder's URL: for one Approved from a one-to-one Chat, that
     /// Chat's link. Read on every fetch; `update` never writes it.
     public let url: URL?
+    /// The id of the list the reminder is in, which the Focus list
+    /// (ADR 0048) reads to tell what is in it. `nil` only from a source
+    /// that doesn't say; the Focus list then leaves the reminder alone.
+    public let listId: String?
 
     public init(
         id: String, title: String, dueAt: Date?, priority: Priority, createdAt: Date,
-        notes: String? = nil, url: URL? = nil
+        notes: String? = nil, url: URL? = nil, listId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -28,6 +32,7 @@ public struct ReminderTask: Equatable, Sendable {
         self.createdAt = createdAt
         self.notes = notes
         self.url = url
+        self.listId = listId
     }
 }
 
@@ -118,6 +123,15 @@ public protocol TaskSource: Sendable {
     /// Deletes the reminder outright — distinct from `complete(id:)`, which
     /// leaves it in place, completed.
     func delete(id: String) throws
+
+    /// The Focus list (ADR 0048): the list with `id` if it still exists,
+    /// otherwise a list titled `title` in the same account as the default
+    /// list, created if there is none. Returns that list's id.
+    func ensureList(id: String?, title: String) throws -> String
+
+    /// The list new reminders go in, where a reminder leaving the Focus
+    /// list goes when its own list is unknown or gone.
+    func defaultListId() -> String?
 }
 
 /// Collapses Reminders' inverted 0-9 priority scale (0 = unset) to the
@@ -158,6 +172,9 @@ public enum ReminderEdit: Equatable, Sendable {
     /// Stored as `reminderDueDateComponents(for:)` gives it: a date at the
     /// start of its day, as a typed phrase always is, is all day.
     case dueDate(Date)
+    /// Moves the reminder to the list with this id, keeping its id
+    /// (ADR 0048). Throws `listNotFound` when there is no such list.
+    case list(String)
 }
 
 /// The raw 0-9 value to store when setting `priority` on a reminder that
@@ -180,4 +197,5 @@ public func reminderDueDateComponents(for date: Date, calendar: Calendar = .curr
 
 public enum TaskSourceError: Error {
     case taskNotFound(id: String)
+    case listNotFound(id: String)
 }

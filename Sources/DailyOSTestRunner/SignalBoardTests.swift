@@ -42,7 +42,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal()])
             }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 let list = board.rankedList(now: now)
                 try expect(list.later.map(\.label) == ["Call the dentist"], "Reminders should be present after its own refresh")
@@ -53,7 +53,8 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("a denied Reminders Gate empties only the Reminders share") {
             let now = Date()
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask()], reminderAvailability: .unavailable) }
-            let availability = await board.refreshReminders()
+            await board.refreshReminders()
+            let availability = await MainActor.run { board.availability(of: .reminders) }
             try await MainActor.run {
                 try expect(availability == .unavailable)
                 try expect(taskSource.listCallCount == 0, "a denied Gate should short-circuit before the fetch")
@@ -69,7 +70,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             let (board, _, _, _) = await MainActor.run {
                 makeBoard(tasks: [reminderTask(id: "r1", title: "Pay rent", priority: .high), reminderTask(id: "r2", title: "Book flights")])
             }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 let row = try require(board.rankedList(now: now).focus.first { $0.id == "r1" })
                 board.snooze(row, until: now.addingTimeInterval(3600))
@@ -84,7 +85,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             let (board, _, _, _) = await MainActor.run {
                 makeBoard(tasks: [reminderTask(id: "r1", title: "A"), reminderTask(id: "r2", title: "B"), reminderTask(id: "r3", title: "C")])
             }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 let later = board.rankedList(now: now).later
                 let byId = Dictionary(uniqueKeysWithValues: later.map { ($0.id, $0) })
@@ -97,7 +98,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
 
         r.run("once the snooze ends the Signal leaves snoozed and is back in its Tier") {
             let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 let later = board.rankedList(now: now.addingTimeInterval(3601))
@@ -109,7 +110,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("Snoozed Signals don't use up the Later cap") {
             let tasks = (0..<(maxRankedSignals + 3)).map { reminderTask(id: "r\($0)", title: "Task \($0)") }
             let (board, _, _, _) = await MainActor.run { makeBoard(tasks: tasks) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 for row in board.rankedList(now: now).later.prefix(3) {
                     board.snooze(row, until: now.addingTimeInterval(3600))
@@ -122,7 +123,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
 
         r.run("unsnooze puts the Signal straight back in its Tier") {
             let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 board.unsnooze(signalId: "r1")
@@ -138,7 +139,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk", provenance: .inferred)])
                 try store.snooze(signalId: "s1", until: now.addingTimeInterval(3600))
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 let list = board.rankedList(now: now)
                 try expect(list.snoozed.isEmpty)
@@ -154,7 +155,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk")])
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 try expect(board.rankedList(now: now).later.map(\.label) == ["Buy milk"])
                 board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
@@ -172,7 +173,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
                     reminderTask(id: "r2", title: "Newer", priority: .high, createdAt: now.addingTimeInterval(-60)),
                 ])
             }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try await MainActor.run {
                 let before = board.rankedList(now: now).focus.map(\.label)
                 try expect(before == ["Newer", "Older"], "neither has been manually placed, so recency alone should decide")
@@ -191,8 +192,8 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(provenance: .inferred)])
             }
-            _ = await board.refreshReminders()
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.refreshReminders()
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 let full = board.rankedList(now: now)
                 try expect(full.focus.count == 1 && full.suggested.count == 1)
@@ -215,7 +216,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [withSender])
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 let list = board.rankedList(now: now)
                 try expect(
@@ -233,7 +234,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal()])
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
             let signal = await MainActor.run { board.rankedList(now: now).later[0] }
 
             await board.promote(signal)
@@ -247,7 +248,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("promoting a Reminders Signal writes through and re-fetches") {
             let now = Date()
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask()]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: now).later[0] }
 
             await board.promote(signal)
@@ -266,8 +267,8 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk")])
             }
-            _ = await board.refreshReminders()
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.refreshReminders()
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 let messagesSignal = board.rankedList(now: now).later.first { $0.label == "Buy milk" }!
                 let remindersSignal = board.rankedList(now: now).later.first { $0.label == "Call the dentist" }!
@@ -296,12 +297,12 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk")])
             }
-            _ = await board.refreshReminders()
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.refreshReminders()
+            await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 try store.promote(signalId: store.openSignals().first!.id)
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
 
             let (remindersSignal, messagesSignal, fetchesBeforeDemote) = await MainActor.run {
                 (
@@ -366,8 +367,8 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk")])
             }
-            _ = await board.refreshReminders()
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.refreshReminders()
+            await board.apply(messages: await intake.refresh(now: now))
             let (remindersSignal, messagesSignal) = await MainActor.run {
                 (
                     board.rankedList(now: now).later.first { $0.label == "Call the dentist" }!,
@@ -388,7 +389,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
 
         r.run("renaming with a date phrase saves the new title and the due date") {
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(priority: .high)]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: Date()).focus[0] }
             let today = Calendar.current.startOfDay(for: Date())
 
@@ -403,7 +404,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("renaming without a date phrase leaves the due date alone") {
             let dueAt = Date(timeIntervalSince1970: 2_000_000)
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(dueAt: dueAt)]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: Date()).focus[0] }
 
             await board.renameTask(signal, to: "Call the vet")
@@ -414,7 +415,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("renaming never writes back fields changed elsewhere since the last read") {
             let dueAt = Date(timeIntervalSince1970: 2_000_000)
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(dueAt: dueAt)]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: Date()).focus[0] }
             // Changed on a phone; DailyOS hasn't re-read it yet.
             try taskSource.update(id: "r1", .priority(.high))
@@ -429,7 +430,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
 
         r.run("promoting never writes back a title changed elsewhere since the last read") {
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask()]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: Date()).later[0] }
             try taskSource.update(id: "r1", .title("Call the dentist at 9"))
 
@@ -455,7 +456,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             // The reminder is renamed and a second fetch runs to the end.
             taskSource.afterReading = nil
             try taskSource.update(id: "r1", .title("Call the vet"))
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             release.signal()
             _ = await slow.value
             try await MainActor.run {
@@ -469,7 +470,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         r.run("deleteTask deletes the reminder and it is gone on the next read") {
             let now = Date()
             let (board, taskSource, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask()]) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             let signal = await MainActor.run { board.rankedList(now: now).later[0] }
 
             await board.deleteTask(signal)
@@ -488,7 +489,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk", provenance: .inferred)])
             }
-            _ = await board.apply(messages: await intake.refresh(now: now))
+            await board.apply(messages: await intake.refresh(now: now))
             let signal = await MainActor.run { board.rankedList(now: now).suggested[0] }
 
             await board.approve(signal)

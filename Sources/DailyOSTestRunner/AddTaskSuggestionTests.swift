@@ -41,7 +41,7 @@ private func makeHarness(messages: [ChatMessage], responses: [String: String]) a
             refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
             foregroundObserver: FakeForegroundObserver(),
             zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-            reExtractionSettings: ReExtractionSettings(defaults: defaults),
+            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
             extractor: FakeIntentExtractor(responses: responses), historyStore: history,
             correctionStore: FakeCorrectionStore(), screeningSettings: screening, apiKeyStore: FakeAPIKeyStore(key: "k"),
             makeScreener: { _ in screener }, bundlePath: "/nonexistent"

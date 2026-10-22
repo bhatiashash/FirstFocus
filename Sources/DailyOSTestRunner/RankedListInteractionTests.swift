@@ -15,9 +15,23 @@ private final class FakeNow: @unchecked Sendable {
 private struct Harness: @unchecked Sendable {
     let model: AppModel
     let taskSource: FakeTaskSource
+    let messagesSource: FakeMessagesSource
     let store: SQLiteSignalStore
     let clock: FakeNow
     let snoozeWakeClock: FakeUndoClock
+}
+
+/// Takes a Source's Gate away or gives it back, then reads that Source the
+/// way a refresh trigger would.
+private func setGate(_ source: Source, _ availability: SourceAvailability, in h: Harness) async {
+    switch source {
+    case .reminders:
+        h.taskSource.gateAvailability = availability
+        await h.model.reload()
+    case .messages:
+        h.messagesSource.gateAvailability = availability
+        await h.model.reloadMessages()
+    }
 }
 
 /// `messageSignals` go into the store as one Batch each, keyed by their
@@ -41,22 +55,26 @@ private func makeHarness(
             try? store.recordOneMessageBatch(sourceRef, signals: batches[sourceRef]!)
         }
         let taskSource = FakeTaskSource(tasks: tasks, availability: .available)
+        let messagesSource = FakeMessagesSource(messages: [])
         let clock = FakeNow(now)
         let snoozeWakeClock = FakeUndoClock()
         let model = AppModel(
             taskSource: taskSource,
-            messagesSource: FakeMessagesSource(messages: []), signalStore: store,
+            messagesSource: messagesSource, signalStore: store,
             contactsResolver: FakeContactsResolver(), settingsOpener: FakeSettingsOpener(),
             refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
             foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
             zenFocusModePreference: preference,
-            reExtractionSettings: ReExtractionSettings(defaults: defaults),
+            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
             undoClock: FakeUndoClock(),
             extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
             apiKeyStore: FakeAPIKeyStore(), now: { clock.date }, bundlePath: "/nonexistent",
             snoozeWakeClock: snoozeWakeClock
         )
-        return Harness(model: model, taskSource: taskSource, store: store, clock: clock, snoozeWakeClock: snoozeWakeClock)
+        return Harness(
+            model: model, taskSource: taskSource, messagesSource: messagesSource, store: store, clock: clock,
+            snoozeWakeClock: snoozeWakeClock
+        )
     }
 }
 
@@ -489,13 +507,13 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
         r.run("an empty list still shows the list, not empty, when a Source is unavailable") {
             let h = await makeHarness()
             await h.model.start()
+            await setGate(.messages, .unavailable, in: h)
+            try await MainActor.run { try expect(h.model.screenMode == .list, "there's a Notice to show for the unreachable Source") }
+            await setGate(.messages, .available, in: h)
+            await setGate(.reminders, .unavailable, in: h)
+            try await MainActor.run { try expect(h.model.screenMode == .list) }
+            await setGate(.reminders, .available, in: h)
             try await MainActor.run {
-                h.model.messagesNeedFullDiskAccess = true
-                try expect(h.model.screenMode == .list, "there's a Notice to show for the unreachable Source")
-                h.model.messagesNeedFullDiskAccess = false
-                h.model.remindersUnavailable = true
-                try expect(h.model.screenMode == .list)
-                h.model.remindersUnavailable = false
                 h.model.extractionUnavailable = true
                 try expect(h.model.screenMode == .list)
             }
@@ -564,17 +582,40 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             }
         }
 
-        r.run("every Notice appears in Messages, Reminders, Extraction order, after every Signal-bearing Section") {
+        r.run("every Notice appears in Messages, Reminders, Extraction order") {
             let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
             await h.model.start()
+            await setGate(.reminders, .unavailable, in: h)
+            await setGate(.messages, .unavailable, in: h)
             try await MainActor.run {
                 h.model.extractionUnavailable = true
-                h.model.remindersUnavailable = true
-                h.model.messagesNeedFullDiskAccess = true
                 try expect(h.model.sections.map(\.id) == [
-                    "suggested", "tier-focus", "tier-later",
                     "notice-messagesUnavailable", "notice-remindersUnavailable", "notice-extractionUnavailable",
                 ])
+            }
+        }
+
+        r.run("a Notice sorts after every Signal-bearing Section") {
+            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
+            await h.model.start()
+            await setGate(.messages, .unavailable, in: h)
+            try await MainActor.run {
+                h.model.extractionUnavailable = true
+                try expect(h.model.sections.map(\.id) == [
+                    "tier-focus", "tier-later", "notice-messagesUnavailable", "notice-extractionUnavailable",
+                ])
+            }
+        }
+
+        r.run("a Gate a verb's refetch finds missing shows its Notice at once") {
+            let h = await makeHarness(tasks: [task(id: "l1")])
+            await h.model.start()
+            h.taskSource.gateAvailability = .unavailable
+            let row = try await MainActor.run { try require(h.model.rankedList.later.first) }
+            await h.model.promote(row)
+            try await MainActor.run {
+                try expect(h.model.remindersUnavailable)
+                try expect(h.model.sections.map(\.id) == ["notice-remindersUnavailable"], "got \(h.model.sections.map(\.id))")
             }
         }
 
@@ -584,9 +625,11 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             try await MainActor.run {
                 let row = try require(h.model.rankedList.later.first { $0.id == "z1" })
                 h.model.snooze(row, until: Date().addingTimeInterval(3600))
-                h.model.remindersUnavailable = true
+            }
+            await setGate(.messages, .unavailable, in: h)
+            try await MainActor.run {
                 try expect(h.model.sections.map(\.id) == [
-                    "suggested", "tier-focus", "tier-later", "snoozed", "notice-remindersUnavailable",
+                    "tier-focus", "tier-later", "snoozed", "notice-messagesUnavailable",
                 ])
             }
         }
@@ -631,25 +674,23 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
         r.run("a Gate coming back removes its Notice") {
             let h = await makeHarness()
             await h.model.start()
-            try await MainActor.run {
-                h.model.remindersUnavailable = true
-                try expect(h.model.sections.map(\.id) == ["notice-remindersUnavailable"])
-                h.model.remindersUnavailable = false
-                try expect(h.model.sections.isEmpty)
-            }
+            await setGate(.reminders, .unavailable, in: h)
+            try await MainActor.run { try expect(h.model.sections.map(\.id) == ["notice-remindersUnavailable"]) }
+            await setGate(.reminders, .available, in: h)
+            try await MainActor.run { try expect(h.model.sections.isEmpty) }
         }
 
         r.run("a Notice survives Zen Focus Mode, even with an empty Focus") {
             let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages, zen: true)
             await h.model.start()
+            await setGate(.messages, .unavailable, in: h)
             try await MainActor.run {
-                h.model.messagesNeedFullDiskAccess = true
                 try expect(h.model.sections.map(\.id) == ["tier-focus", "notice-messagesUnavailable"])
             }
             let empty = await makeHarness(zen: true)
             await empty.model.start()
+            await setGate(.messages, .unavailable, in: empty)
             try await MainActor.run {
-                empty.model.messagesNeedFullDiskAccess = true
                 try expect(empty.model.sections.map(\.id) == ["notice-messagesUnavailable"])
             }
         }

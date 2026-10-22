@@ -348,7 +348,8 @@ struct AppShellView: View {
             AdvancedTabView(
                 morningBriefViewModel: morningBriefViewModel, openAtLoginViewModel: openAtLoginViewModel,
                 viewModel: settingsViewModel, screeningViewModel: screeningViewModel, rulesViewModel: rulesViewModel,
-                mutedChatsViewModel: mutedChatsViewModel, activeModelName: model.activeModelDisplayName, captureHotkeyPreset: $model.captureHotkeyPreset
+                mutedChatsViewModel: mutedChatsViewModel, activeModelName: model.activeModelDisplayName, captureHotkeyPreset: $model.captureHotkeyPreset,
+                isFocusListEnabled: $model.isFocusListEnabled
             )
         case .about:
             AboutTabView(captureHotkeyPreset: model.captureHotkeyPreset)

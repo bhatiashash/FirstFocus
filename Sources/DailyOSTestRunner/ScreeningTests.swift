@@ -282,7 +282,7 @@ func registerScreeningAppModelTests(_ runner: TestRunner) {
                         eventKitChanges: FakeEventKitChangeObserver(),
                         foregroundObserver: FakeForegroundObserver(),
                         zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                        reExtractionSettings: ReExtractionSettings(defaults: defaults),
+                        focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
                         extractor: extractor,
                         historyStore: makeTestHistoryStore(),
                         correctionStore: FakeCorrectionStore(),

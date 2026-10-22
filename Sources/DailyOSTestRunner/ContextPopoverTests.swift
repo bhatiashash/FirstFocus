@@ -21,7 +21,7 @@ private func makeModel(suggestions: [Signal], zen: Bool = false) -> AppModel {
         refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
         foregroundObserver: FakeForegroundObserver(),
         zenFocusModePreference: preference,
-        reExtractionSettings: ReExtractionSettings(defaults: defaults),
+        focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
         extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
         apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
     )

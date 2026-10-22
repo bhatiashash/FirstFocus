@@ -1,12 +1,12 @@
 import Foundation
 
-/// Signal durable state, in four protocols. Three are split along who
+/// Signal durable state, in five protocols. Four are split along who
 /// calls them (ADR 0021). The Batch Ledger is grouped around the Batch
 /// instead, because every one of its callers asks about Batches (ADR 0021,
-/// amended 2026-09-26). `SignalStore` composes all four back into the one
+/// amended 2026-09-26). `SignalStore` composes all five back into the one
 /// type `SQLiteSignalStore` implements in full; tests run against it too,
 /// on a file of their own.
-public protocol SignalStore: BatchLedger, MessagesIntakeState, SignalBoardStore, CheckOffStore {}
+public protocol SignalStore: BatchLedger, MessagesIntakeState, SignalBoardStore, CheckOffStore, FocusListStore {}
 
 /// The durable record of what Extraction produced from each Batch.
 /// Load-bearing rather than convenient: Extraction never re-runs on a
@@ -334,6 +334,20 @@ public protocol SignalBoardStore: Sendable {
 
     /// `approvedSender(reminderId:)`, batched — see `focusOrders(signalIds:)`.
     func approvedSenders(reminderIds: [String]) -> [String: String]
+
+}
+
+/// The Focus list's record (ADR 0048): the reminders that were in it at
+/// the last sync, with the list each goes back to. Its own protocol, since
+/// its one caller is the Focus list module (ADR 0021).
+public protocol FocusListStore: Sendable {
+    /// `nil` when the store can't be read, which a caller must never
+    /// mistake for an empty list: that would read every reminder in the
+    /// list as one you just put there.
+    func focusListPlacements() -> [FocusListPlacement]?
+
+    /// Replaces every placement with `placements`.
+    func setFocusListPlacements(_ placements: [FocusListPlacement]) throws
 }
 
 /// The write-through half of Check off, isolated to its own one-method

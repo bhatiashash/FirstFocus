@@ -37,10 +37,12 @@ struct AdvancedTabView: View {
     @ObservedObject var mutedChatsViewModel: MutedChatsViewModel
     let activeModelName: String?
     @Binding var captureHotkeyPreset: CaptureHotkeyPreset
+    @Binding var isFocusListEnabled: Bool
 
     var body: some View {
         Form {
             MorningBriefSection(viewModel: morningBriefViewModel)
+            FocusListSection(isEnabled: $isFocusListEnabled)
             OpenAtLoginSection(viewModel: openAtLoginViewModel)
             RulesSection(viewModel: rulesViewModel)
             ReExtractionSection(viewModel: viewModel)
@@ -127,6 +129,25 @@ private struct MorningBriefSection: View {
         }
         .sheet(isPresented: $isEditingFormat) {
             MorningBriefFormatSheet(viewModel: viewModel)
+        }
+    }
+}
+
+/// The Focus list (ADR 0048): a list in Reminders that holds what is in
+/// Focus. Beside the Morning Brief, the other way to see Focus away from
+/// the window.
+private struct FocusListSection: View {
+    @Binding var isEnabled: Bool
+
+    var body: some View {
+        Section {
+            Toggle("Keep a Focus list in Reminders", isOn: $isEnabled)
+        } header: {
+            Text("Focus List")
+        } footer: {
+            Text("Moves every reminder in Focus into a Reminders list called Focus, and back to its own list when it leaves Focus or is snoozed. Putting a reminder in that list yourself, on your phone or in Reminders, moves it to Focus here. Taking one out moves it to Later, unless its due date keeps it in Focus. Turning this off moves everything back and leaves the list empty.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

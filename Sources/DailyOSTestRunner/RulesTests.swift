@@ -136,7 +136,7 @@ func registerRulesTests(_ runner: TestRunner) {
                     refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
                     foregroundObserver: FakeForegroundObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    reExtractionSettings: ReExtractionSettings(defaults: defaults),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
                     extractor: extractor, historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
                     apiKeyStore: FakeAPIKeyStore(), ruleStore: rules, bundlePath: "/nonexistent"
                 )

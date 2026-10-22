@@ -96,12 +96,15 @@ public final class AppModel: ObservableObject {
     /// descendant) and need a shared place to signal "open the add sheet."
     @Published public var isAddingTask = false
 
-    @Published public var messagesNeedFullDiskAccess = false {
-        didSet { updateScreen() }
-    }
-    @Published public var remindersUnavailable = false {
-        didSet { updateScreen() }
-    }
+    /// Whether each Source shows as Unavailable, read from the Signal
+    /// Board by `republish()` so that a Gate any read finds missing shows
+    /// at once, whichever verb made the read.
+    @Published public private(set) var messagesNeedFullDiskAccess = false
+    @Published public private(set) var remindersUnavailable = false
+    /// A signing identity that changed since the last launch (ticket 10).
+    /// Shows Messages as Unavailable from launch until the first pass
+    /// reads Messages and finds out for itself.
+    private var messagesIdentityMismatch = false
     @Published public var extractionUnavailable = false {
         didSet { updateScreen() }
     }
@@ -168,6 +171,11 @@ public final class AppModel: ObservableObject {
     @Published public var captureHotkeyPreset: CaptureHotkeyPreset {
         didSet { captureHotkeyPreference.selected = captureHotkeyPreset }
     }
+    /// The Focus list in Reminders (ADR 0048), from Advanced. Turning it
+    /// off sends every reminder in it back to its own list.
+    @Published public var isFocusListEnabled: Bool {
+        didSet { focusList.isEnabled = isFocusListEnabled }
+    }
     /// Held directly, alongside handing the same instance to `board` at
     /// init, purely for `start()`'s one-time Gate request — requesting
     /// access is a launch-time action, not part of reading or ranking, so
@@ -185,6 +193,9 @@ public final class AppModel: ObservableObject {
     private let dayChanges: any DayChangeObserver
     private let zenFocusModePreference: ZenFocusModePreference
     private let captureHotkeyPreference: CaptureHotkeyPreference
+    /// Keeps the Focus list in Reminders in line with the Focus Tier
+    /// (ADR 0048), told each time the list is derived.
+    private let focusList: FocusList
     /// Extraction settings (ticket 04): the prompt and model path
     /// `loadExtractor()` reads instead of always using the built-in
     /// defaults. Injectable the same way every other preference wrapper
@@ -270,6 +281,7 @@ public final class AppModel: ObservableObject {
         dayChanges: any DayChangeObserver = NotificationCenterDayChangeObserver(),
         zenFocusModePreference: ZenFocusModePreference = ZenFocusModePreference(),
         captureHotkeyPreference: CaptureHotkeyPreference = CaptureHotkeyPreference(),
+        focusListPreference: FocusListPreference = FocusListPreference(),
         extractionSettings: ExtractionSettings = ExtractionSettings(),
         reExtractionSettings: ReExtractionSettings = ReExtractionSettings(),
         undoClock: any UndoClock = TaskSleepUndoClock(),
@@ -303,6 +315,8 @@ public final class AppModel: ObservableObject {
         )
         self.intake = intake
         self.board = SignalBoard(taskSource: taskSource, signalStore: signalStore, now: now)
+        self.focusList = FocusList(taskSource: taskSource, store: signalStore, board: board, preference: focusListPreference)
+        self.isFocusListEnabled = focusListPreference.isEnabled
         self.checkOffCoordinator = CheckOffCoordinator(taskSource: taskSource, signalStore: signalStore)
         self.undoBar = UndoBar(clock: undoClock, window: undoWindow)
         self.settingsOpener = settingsOpener
@@ -349,6 +363,9 @@ public final class AppModel: ObservableObject {
             guard let self else { return }
             self.undoOffer = self.undoBar.current
             self.republish()
+        }
+        self.focusList.onChange = { [weak self] in
+            self?.republish()
         }
         self.checkOffCoordinator.onCommitted = { [weak self] in
             await self?.reload()
@@ -529,7 +546,7 @@ public final class AppModel: ObservableObject {
     /// re-extraction does, and puts it on the Board.
     func addMessageSignal(_ signal: Signal) {
         if intake.addSignal(signal) {
-            _ = board.apply(messages: .refreshed(intake.storedSignals()))
+            board.seed(messages: intake.storedSignals())
         }
         republish()
     }
@@ -543,14 +560,20 @@ public final class AppModel: ObservableObject {
     /// Re-reads the stored Messages Signals onto the Board, after History
     /// changed them in the store directly.
     func reloadMessageSignals() {
-        _ = board.apply(messages: .refreshed(intake.storedSignals()))
+        board.seed(messages: intake.storedSignals())
         republish()
     }
 
     private func applyMessages(_ result: MessagesIntake.Result) {
-        let availability = board.apply(messages: result)
-        messagesNeedFullDiskAccess = availability == .unavailable
+        applyPass(result)
         republish()
+    }
+
+    /// A pass's result onto the Board. A pass has read Messages, so a
+    /// launch-time identity mismatch no longer decides anything.
+    private func applyPass(_ result: MessagesIntake.Result) {
+        board.apply(messages: result)
+        messagesIdentityMismatch = false
     }
 
     /// Fires once during `start()`, as soon as Reminders and every stored
@@ -575,9 +598,7 @@ public final class AppModel: ObservableObject {
         // first read attempt. `reloadMessages()` still runs its own
         // availability() probe right after and is the authoritative
         // source of truth once it does; see `MessagesIntake.identityMismatch`.
-        if intake.identityMismatch() {
-            messagesNeedFullDiskAccess = true
-        }
+        messagesIdentityMismatch = intake.identityMismatch()
         setUpRefreshCoordinator()
         applyScreeningSettings()
         _ = try? await taskSource.requestAccess()
@@ -595,7 +616,7 @@ public final class AppModel: ObservableObject {
         // moments later (see `screenMode`), and clearing early there would
         // flash "Nothing open. Nice." at someone whose backfill is about to
         // start.
-        _ = board.apply(messages: .refreshed(intake.storedSignals()))
+        board.seed(messages: intake.storedSignals())
         republish()
         onStoredListReady?()
         if signalStore.isBackfillComplete() {
@@ -652,8 +673,7 @@ public final class AppModel: ObservableObject {
     /// Retriable directly from the UI (`UnavailableSourceRow`'s retry
     /// control), not just reachable through a refresh trigger.
     public func reload() async {
-        let availability = await board.refreshReminders()
-        remindersUnavailable = availability == .unavailable
+        await board.refreshReminders()
         republish()
     }
 
@@ -671,8 +691,7 @@ public final class AppModel: ObservableObject {
                 self?.backfillProgress = (completed, total)
             }
         }
-        let availability = board.apply(messages: result)
-        messagesNeedFullDiskAccess = availability == .unavailable
+        applyPass(result)
         backfillProgress = nil
         republish()
     }
@@ -711,8 +730,7 @@ public final class AppModel: ObservableObject {
                 self?.reExtractionProgress = (completed, total)
             }
         }
-        let availability = board.apply(messages: result)
-        messagesNeedFullDiskAccess = availability == .unavailable
+        applyPass(result)
         reExtractionProgress = nil
         republish()
     }
@@ -758,6 +776,10 @@ public final class AppModel: ObservableObject {
     /// gestures are judged against the same day the list shows.
     private func republish() {
         rankedAt = now()
+        let remindersOut = board.availability(of: .reminders) == .unavailable
+        if remindersOut != remindersUnavailable { remindersUnavailable = remindersOut }
+        let messagesOut = messagesIdentityMismatch || board.availability(of: .messages) == .unavailable
+        if messagesOut != messagesNeedFullDiskAccess { messagesNeedFullDiskAccess = messagesOut }
         rankedList = board.rankedList(now: rankedAt, hiding: hidingIDs)
         checkedOff = board.checkedOff(now: rankedAt, hiding: hidingIDs)
         checkedOffCount = checkedOff.count
@@ -770,6 +792,13 @@ public final class AppModel: ObservableObject {
             previewedSuggestionId = nil
         }
         scheduleSnoozeWake()
+        focusList.listDerived(at: rankedAt)
+    }
+
+    /// Waits for every Focus list sync asked for so far, and any each one
+    /// leads to. For tests.
+    public func focusListSettled() async {
+        await focusList.settled()
     }
 
     /// The Morning Brief's text (ADR 0046), from the Ranked List derived

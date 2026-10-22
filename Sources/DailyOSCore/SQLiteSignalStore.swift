@@ -462,6 +462,51 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         return results
     }
 
+    public func focusListPlacements() -> [FocusListPlacement]? {
+        guard let db = open() else { return nil }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(
+            db, "SELECT reminder_id, home_list_id FROM focus_list", -1, &statement, nil
+        ) == SQLITE_OK, let statement else { return nil }
+        var results: [FocusListPlacement] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let reminderId = text(statement, 0) {
+                results.append(FocusListPlacement(reminderId: reminderId, homeListId: text(statement, 1)))
+            }
+        }
+        return results
+    }
+
+    public func setFocusListPlacements(_ placements: [FocusListPlacement]) throws {
+        guard let db = open() else { throw SignalStoreError.cannotOpen }
+        defer { sqlite3_close(db) }
+
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK else {
+            throw SignalStoreError.writeFailed
+        }
+        do {
+            try executeIn(db, "DELETE FROM focus_list") { _ in }
+            for placement in placements {
+                try executeIn(db, "INSERT OR REPLACE INTO focus_list (reminder_id, home_list_id) VALUES (?, ?)") {
+                    sqlite3_bind_text($0, 1, placement.reminderId, -1, sqliteTransient)
+                    if let home = placement.homeListId {
+                        sqlite3_bind_text($0, 2, home, -1, sqliteTransient)
+                    } else {
+                        sqlite3_bind_null($0, 2)
+                    }
+                }
+            }
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw SignalStoreError.writeFailed
+            }
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
     public func approvedSender(reminderId: String) -> String? {
         queryOne("SELECT sender FROM reminder_senders WHERE reminder_id = ? LIMIT 1", bind: {
             sqlite3_bind_text($0, 1, reminderId, -1, sqliteTransient)
@@ -854,6 +899,10 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         CREATE TABLE IF NOT EXISTS snoozes (
             signal_id TEXT PRIMARY KEY,
             snoozed_until TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS focus_list (
+            reminder_id TEXT PRIMARY KEY,
+            home_list_id TEXT
         );
         CREATE TABLE IF NOT EXISTS reminder_senders (
             reminder_id TEXT PRIMARY KEY,

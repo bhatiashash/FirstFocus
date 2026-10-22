@@ -68,7 +68,7 @@ private func makeHarness(
         foregroundObserver: foreground,
         dayChanges: dayChanges,
         zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-        reExtractionSettings: reExtractionSettings,
+        focusListPreference: isolatedFocusListOff(), reExtractionSettings: reExtractionSettings,
         undoClock: undoClock,
         extractor: extractor,
         historyStore: historyStore,
@@ -372,11 +372,9 @@ func registerAppModelTests(_ runner: TestRunner) {
         }
 
         r.run("Messages needing Full Disk Access disables it — nothing to re-extract from") {
-            let h = await MainActor.run { makeHarness() }
-            await MainActor.run {
-                h.model.isLoading = false
-                h.model.messagesNeedFullDiskAccess = true
-            }
+            let h = await MainActor.run { makeHarness(messages: .unavailable) }
+            await h.model.reloadMessages()
+            await MainActor.run { h.model.isLoading = false }
             try await MainActor.run { try expect(h.model.canReExtract == false) }
         }
 
@@ -390,11 +388,9 @@ func registerAppModelTests(_ runner: TestRunner) {
         }
 
         r.run("remindersUnavailable alone does not disable it — re-extraction only concerns Messages") {
-            let h = await MainActor.run { makeHarness() }
-            await MainActor.run {
-                h.model.isLoading = false
-                h.model.remindersUnavailable = true
-            }
+            let h = await MainActor.run { makeHarness(reminders: .unavailable) }
+            await h.model.reload()
+            await MainActor.run { h.model.isLoading = false }
             try await MainActor.run { try expect(h.model.canReExtract) }
         }
 

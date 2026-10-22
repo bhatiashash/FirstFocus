@@ -263,7 +263,7 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                     settingsOpener: FakeSettingsOpener(), refreshClock: FakeRefreshClock(),
                     eventKitChanges: FakeEventKitChangeObserver(), foregroundObserver: FakeForegroundObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    reExtractionSettings: ReExtractionSettings(defaults: defaults),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
                     extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
                     correctionStore: FakeCorrectionStore(), screeningSettings: settings, apiKeyStore: keys,
                     makeScreener: { _ in screener }, bundlePath: "/nonexistent"
@@ -333,7 +333,7 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                     refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
                     foregroundObserver: FakeForegroundObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: defaults),
-                    reExtractionSettings: ReExtractionSettings(defaults: defaults),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
                     extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
                     correctionStore: FakeCorrectionStore(), screeningSettings: settings, apiKeyStore: keys,
                     makeScreener: { key in

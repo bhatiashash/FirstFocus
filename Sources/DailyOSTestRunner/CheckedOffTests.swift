@@ -41,7 +41,7 @@ private func makeHarness(
             refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
             foregroundObserver: FakeForegroundObserver(), dayChanges: dayChanges,
             zenFocusModePreference: preference,
-            reExtractionSettings: ReExtractionSettings(defaults: defaults),
+            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
             undoClock: undoClock,
             extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
             apiKeyStore: FakeAPIKeyStore(), now: { clock.date }, bundlePath: "/nonexistent"

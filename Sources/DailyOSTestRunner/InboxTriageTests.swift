@@ -34,7 +34,7 @@ private func makeHarness(suggestionLabels: [String], zen: Bool = false) async ->
             refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
             foregroundObserver: FakeForegroundObserver(),
             zenFocusModePreference: preference,
-            reExtractionSettings: ReExtractionSettings(defaults: defaults),
+            focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: defaults),
             extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(), correctionStore: FakeCorrectionStore(),
             apiKeyStore: FakeAPIKeyStore(), bundlePath: "/nonexistent"
         )

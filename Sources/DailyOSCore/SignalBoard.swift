@@ -32,8 +32,16 @@ public final class SignalBoard {
     /// one started throws its older read away instead of replacing the
     /// newer one's.
     private var reminderFetchCount = 0
+    /// Which fetch `reminderSignals` came from, 0 before any.
+    private var remindersReadAt = 0
+    /// Each reminder's list, open and checked off, from the last fetch.
+    private var reminderListIds: [String: String] = [:]
     /// Read only to bound the checked-off fetch to today.
     private let now: @MainActor () -> Date
+    /// What the last read of each Source found about its Gate. Recorded
+    /// by every read, including one a verb's refetch makes, so a Gate
+    /// revoked mid-session shows as soon as anything reads that Source.
+    private var availabilities: [Source: SourceAvailability] = [:]
 
     public init(
         taskSource: any TaskSource, signalStore: any SignalBoardStore, now: @escaping @MainActor () -> Date = { Date() }
@@ -45,45 +53,63 @@ public final class SignalBoard {
 
     // MARK: - Refresh
 
+    /// Whether `source` could be read last time it was: `.unavailable`
+    /// once a read found its Gate missing, `.available` before any read.
+    public func availability(of source: Source) -> SourceAvailability {
+        availabilities[source] ?? .available
+    }
+
     /// Re-fetches Reminders and replaces its share of the Board: the open
     /// reminders and those checked off since the start of today.
-    public func refreshReminders() async -> SourceAvailability {
+    public func refreshReminders() async {
         reminderFetchCount += 1
         let fetch = reminderFetchCount
-        let availability = taskSource.availability()
-        guard availability == .available else {
+        guard taskSource.availability() == .available else {
             reminderSignals = []
             checkedOffReminders = []
-            return .unavailable
+            reminderListIds = [:]
+            remindersReadAt = 0
+            availabilities[.reminders] = .unavailable
+            return
         }
         let source = taskSource
         let since = Calendar.current.startOfDay(for: now())
         let (tasks, checkedOff) = await Task.detached {
             (source.listOpenTasks(), source.listCheckedOffTasks(since: since))
         }.value
-        guard fetch == reminderFetchCount else { return .available }
+        guard fetch == reminderFetchCount else { return }
         reminderSignals = tasks.map(makeSignal(from:))
         checkedOffReminders = checkedOff
-        return .available
+        reminderListIds = Dictionary(
+            (checkedOff.map(\.task) + tasks).compactMap { task in task.listId.map { (task.id, $0) } },
+            uniquingKeysWith: { _, open in open }
+        )
+        remindersReadAt = fetch
+        availabilities[.reminders] = .available
     }
 
     /// Replaces the Messages share with what a Messages Intake pass
     /// produced. `.extractionUnavailable` deliberately leaves the share
     /// exactly as it was, never clearing it, since there's a Gate open and
-    /// real Signals behind it, just no model to re-derive them with. A
-    /// caller seeding the share from the store (ADR 0035) passes
-    /// `.refreshed` with the stored Signals.
-    public func apply(messages result: MessagesIntake.Result) -> SourceAvailability {
+    /// real Signals behind it, just no model to re-derive them with.
+    public func apply(messages result: MessagesIntake.Result) {
         switch result {
         case .unavailable:
             messageSignals = []
-            return .unavailable
+            availabilities[.messages] = .unavailable
         case .extractionUnavailable:
-            return .available
+            availabilities[.messages] = .available
         case .refreshed(let signals):
             messageSignals = signals
-            return .available
+            availabilities[.messages] = .available
         }
+    }
+
+    /// Replaces the Messages share with Signals read back from the store
+    /// (ADR 0035) rather than from a pass. Reads nothing from Messages, so
+    /// it leaves the Source's availability as the last pass found it.
+    public func seed(messages signals: [Signal]) {
+        messageSignals = signals
     }
 
     // MARK: - Reading
@@ -214,7 +240,7 @@ public final class SignalBoard {
             let taskSource = self.taskSource
             let id = signal.sourceRef
             await Task.detached { try? taskSource.update(id: id, .priority(priority)) }.value
-            _ = await refreshReminders()
+            await refreshReminders()
         case .messages:
             guard let index = messageSignals.firstIndex(where: { $0.id == signal.id }) else { return }
             messageSignals[index].priority = priority
@@ -278,7 +304,7 @@ public final class SignalBoard {
             try? signalStore.recordApprovedSender(reminderId: created.id, sender: sender)
         }
         messageSignals.removeAll { $0.id == signal.id }
-        _ = await refreshReminders()
+        await refreshReminders()
         return created.id
     }
 
@@ -292,7 +318,7 @@ public final class SignalBoard {
         try? signalStore.forgetApprovedSender(reminderId: reminderId)
         try? signalStore.unsnooze(signalId: reminderId)
         try? signalStore.reopen(signalId: signalId)
-        _ = await refreshReminders()
+        await refreshReminders()
     }
 
     /// Bidirectional Reminders sync: writes through, then re-fetches
@@ -307,7 +333,7 @@ public final class SignalBoard {
         guard !trimmed.isEmpty else { return nil }
         let taskSource = self.taskSource
         let created = await Task.detached { try? taskSource.create(ReminderDraft(title: trimmed, dueAt: dueAt, priority: priority)) }.value
-        _ = await refreshReminders()
+        await refreshReminders()
         return created?.id
     }
 
@@ -323,7 +349,7 @@ public final class SignalBoard {
             try? taskSource.update(id: id, .title(trimmed))
             if let dueAt { try? taskSource.update(id: id, .dueDate(dueAt)) }
         }.value
-        _ = await refreshReminders()
+        await refreshReminders()
     }
 
     /// Reopens a reminder from the Checked Off sheet and re-fetches, so
@@ -336,14 +362,39 @@ public final class SignalBoard {
         let taskSource = self.taskSource
         await Task.detached { try? taskSource.reopen(id: reminder.id) }.value
         try? signalStore.clearFocusOrder(signalId: reminder.id)
-        _ = await refreshReminders()
+        await refreshReminders()
     }
 
     public func deleteTask(_ signal: Signal) async {
         guard signal.source == .reminders else { return }
         let taskSource = self.taskSource
         await Task.detached { try? taskSource.delete(id: signal.sourceRef) }.value
-        _ = await refreshReminders()
+        await refreshReminders()
+    }
+}
+
+// MARK: - Focus list
+
+/// The Reminders share as the Focus list reads it (ADR 0048): every open
+/// reminder, hydrated with its snooze, today's checked-off ones, each
+/// one's list, and which fetch all of it came from.
+public struct ReminderSnapshot: Sendable {
+    public let open: [Signal]
+    public let checkedOffIds: [String]
+    public let listIds: [String: String]
+    /// Rises with every fetch, so two snapshots from one fetch match.
+    public let fetch: Int
+}
+
+extension SignalBoard {
+    /// The Reminders share, or `nil` while Reminders is Unavailable or
+    /// before its first read.
+    public func reminderSnapshot() -> ReminderSnapshot? {
+        guard availability(of: .reminders) == .available, remindersReadAt > 0 else { return nil }
+        return ReminderSnapshot(
+            open: hydrate(reminderSignals), checkedOffIds: checkedOffReminders.map(\.id), listIds: reminderListIds,
+            fetch: remindersReadAt
+        )
     }
 }
 

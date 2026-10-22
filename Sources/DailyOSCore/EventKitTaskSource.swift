@@ -77,7 +77,8 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
             priority: collapseReminderPriority(reminder.priority),
             createdAt: reminder.creationDate ?? .distantPast,
             notes: reminder.hasNotes ? reminder.notes : nil,
-            url: reminder.url
+            url: reminder.url,
+            listId: reminder.calendar?.calendarIdentifier
         )
     }
 
@@ -111,7 +112,8 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
             priority: draft.priority,
             createdAt: reminder.creationDate ?? .distantPast,
             notes: draft.notes,
-            url: draft.url
+            url: draft.url,
+            listId: reminder.calendar?.calendarIdentifier
         )
     }
 
@@ -126,6 +128,11 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
             reminder.priority = reminderPriority(setting: priority, over: reminder.priority)
         case .dueDate(let dueAt):
             reminder.dueDateComponents = reminderDueDateComponents(for: dueAt)
+        case .list(let listId):
+            guard let list = store.calendar(withIdentifier: listId) else {
+                throw TaskSourceError.listNotFound(id: listId)
+            }
+            reminder.calendar = list
         }
         try store.save(reminder, commit: true)
     }
@@ -133,6 +140,30 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
     public func delete(id: String) throws {
         let reminder = try fetchReminder(id: id)
         try store.remove(reminder, commit: true)
+    }
+
+    /// A new list goes in the default list's account, since a reminder
+    /// can only move between lists in one account. Moving keeps the
+    /// reminder's id (checked against iCloud on 2026-10-21).
+    public func ensureList(id: String?, title: String) throws -> String {
+        if let id, let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) {
+            return list.calendarIdentifier
+        }
+        guard let account = store.defaultCalendarForNewReminders()?.source else {
+            throw TaskSourceError.listNotFound(id: id ?? title)
+        }
+        if let existing = store.calendars(for: .reminder).first(where: { $0.title == title && $0.source == account }) {
+            return existing.calendarIdentifier
+        }
+        let list = EKCalendar(for: .reminder, eventStore: store)
+        list.title = title
+        list.source = account
+        try store.saveCalendar(list, commit: true)
+        return list.calendarIdentifier
+    }
+
+    public func defaultListId() -> String? {
+        store.defaultCalendarForNewReminders()?.calendarIdentifier
     }
 
     private func fetchReminder(id: String) throws -> EKReminder {

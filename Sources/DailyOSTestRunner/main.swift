@@ -96,6 +96,7 @@ registerMorningBriefTests(runner)
 registerMorningBriefDeliveryTests(runner)
 registerMorningBriefViewModelTests(runner)
 registerOpenAtLoginTests(runner)
+registerFocusListTests(runner)
 
 let status = runner.summarize()
 removeTestStores()

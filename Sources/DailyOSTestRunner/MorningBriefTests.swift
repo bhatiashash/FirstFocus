@@ -156,7 +156,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
             let board = await MainActor.run {
                 SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store)
             }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try store.snooze(signalId: "r0", until: now.addingTimeInterval(86400))
             try await MainActor.run {
                 let list = board.rankedList(now: now)
@@ -174,7 +174,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                 ReminderTask(id: "r\($0.offset)", title: $0.element, dueAt: nil, priority: .high, createdAt: now)
             }
             let board = await MainActor.run { SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store) }
-            _ = await board.refreshReminders()
+            await board.refreshReminders()
             try store.setFocusOrders(["r2": 0, "r0": 1, "r1": 2])
             let text = await MainActor.run { composeMorningBrief(board.rankedList(now: now), now: now) }
             try expect(text.contains("\n\nSend Q3 numbers\nPay rent\nCall the dentist\n"), "got\n\(text)")
@@ -193,7 +193,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
                     foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: morningBriefDefaults()),
-                    reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
                     extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
                     correctionStore: FakeCorrectionStore(), apiKeyStore: FakeAPIKeyStore(), now: { clock.date },
                     bundlePath: "/nonexistent", snoozeWakeClock: FakeUndoClock()
@@ -221,7 +221,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     refreshClock: FakeRefreshClock(), eventKitChanges: FakeEventKitChangeObserver(),
                     foregroundObserver: FakeForegroundObserver(), dayChanges: FakeDayChangeObserver(),
                     zenFocusModePreference: ZenFocusModePreference(defaults: morningBriefDefaults()),
-                    reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
+                    focusListPreference: isolatedFocusListOff(), reExtractionSettings: ReExtractionSettings(defaults: morningBriefDefaults()),
                     extractor: FakeIntentExtractor(), historyStore: makeTestHistoryStore(),
                     correctionStore: FakeCorrectionStore(), apiKeyStore: FakeAPIKeyStore(),
                     bundlePath: "/nonexistent", snoozeWakeClock: FakeUndoClock()

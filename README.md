@@ -35,6 +35,7 @@ Things you need to do don't only live in your to-do app. Someone texts "can you 
 - **Focus and Later.** Dated items come first, most overdue at the top, then items by priority. Drag a row to put it where you want; your order wins.
 - **Suggested.** Tasks found in messages wait here for Approve or Dismiss. If a later message changes or cancels the plan, the suggestion is updated or withdrawn.
 - **Snooze.** Swipe a row to hide it until tomorrow or next Monday at 8:00 AM.
+- **Focus list in Reminders.** Everything in Focus also sits in a Reminders list called Focus, so your phone shows the same Focus. Move a reminder in or out of that list and FirstFocus moves it to Focus or Later to match. Turn it off in Advanced.
 - **Morning Brief.** A text to yourself each morning with your Focus list. You pick the time, how many items, and the layout. It only ever goes to your own conversation with yourself.
 - **Quick Capture.** Press ⌥Space in any app to add a reminder. Dates like "tomorrow" or "next friday" are picked up as you type.
 - **Zen Focus Mode.** Shrinks the window to a strip showing only Focus.
@@ -72,7 +73,7 @@ On first launch FirstFocus reads your recent notes to yourself in Messages, then
 ## Privacy
 
 - Message text is read from Messages' database on your Mac and judged by a model running on your Mac.
-- FirstFocus only writes to Reminders: it creates, edits, completes and deletes reminders when you ask it to. It never changes or deletes anything in Messages. The one message it sends is the Morning Brief, to yourself, when you turn it on.
+- FirstFocus only writes to Reminders: it creates, edits, completes and deletes reminders when you ask it to, and moves reminders in and out of the Focus list while that setting is on. It never changes or deletes anything in Messages. The one message it sends is the Morning Brief, to yourself, when you turn it on.
 - Codes and verification messages are recognized and skipped. Conversations you mute are never read again.
 - **Optional:** Advanced has a Screening setting, off by default, that sends message text (with senders anonymized) to a hosted service to skip obvious non-tasks before the local model runs. It needs your own API key and does nothing unless you turn it on.
 
