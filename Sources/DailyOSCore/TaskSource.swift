@@ -20,10 +20,14 @@ public struct ReminderTask: Equatable, Sendable {
     /// (ADR 0048) reads to tell what is in it. `nil` only from a source
     /// that doesn't say; the Focus list then leaves the reminder alone.
     public let listId: String?
+    /// Whether it repeats. Checking off a repeating reminder keeps its id
+    /// open and moves its due date to the next occurrence, which is how a
+    /// check-off made elsewhere ends its snooze (CONTEXT.md: Snoozed).
+    public let isRecurring: Bool
 
     public init(
         id: String, title: String, dueAt: Date?, priority: Priority, createdAt: Date,
-        notes: String? = nil, url: URL? = nil, listId: String? = nil
+        notes: String? = nil, url: URL? = nil, listId: String? = nil, isRecurring: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -33,6 +37,7 @@ public struct ReminderTask: Equatable, Sendable {
         self.notes = notes
         self.url = url
         self.listId = listId
+        self.isRecurring = isRecurring
     }
 }
 

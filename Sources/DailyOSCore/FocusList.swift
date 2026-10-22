@@ -146,7 +146,7 @@ public final class FocusList {
             return false
         }
 
-        for step in toRun where step.unsnooze { board.unsnooze(signalId: step.reminderId) }
+        for step in toRun where step.unsnooze { board.snoozes.end(signalId: step.reminderId) }
         let taskSource = self.taskSource
         let writes = toRun
         let failed = await Task.detached {

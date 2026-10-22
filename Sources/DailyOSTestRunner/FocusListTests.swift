@@ -133,10 +133,10 @@ func registerFocusListTests(_ runner: TestRunner) {
         r.run("a Snoozed reminder leaves the list and stays Snoozed") {
             let h = await MainActor.run { makeHarness([task("a", priority: .high, list: focus)], placed: [placed("a", home)]) }
             let until = Date().addingTimeInterval(3600)
-            await MainActor.run { h.board.snooze(signalId: "a", until: until) }
+            await MainActor.run { h.board.snoozes.snooze(signalId: "a", until: until, dueAt: nil) }
             await sync(h)
             try expect(list(of: "a", in: h.taskSource) == home)
-            try await MainActor.run { try expect(h.board.snoozedUntil(signalId: "a") != nil, "only a move you make ends a snooze") }
+            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "a") != nil, "only a move you make ends a snooze") }
         }
 
         r.run("a reminder checked off in the list goes back to its own list") {
@@ -181,9 +181,9 @@ func registerFocusListTests(_ runner: TestRunner) {
 
         r.run("putting a Snoozed reminder in the list ends its snooze") {
             let h = await MainActor.run { makeHarness([task("a", priority: .high, list: focus)]) }
-            await MainActor.run { h.board.snooze(signalId: "a", until: Date().addingTimeInterval(3600)) }
+            await MainActor.run { h.board.snoozes.snooze(signalId: "a", until: Date().addingTimeInterval(3600), dueAt: nil) }
             await sync(h)
-            try await MainActor.run { try expect(h.board.snoozedUntil(signalId: "a") == nil) }
+            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "a") == nil) }
             try expect(list(of: "a", in: h.taskSource) == focus)
             try expect(h.changes.value == 1, "ending a snooze changes the Board")
         }
@@ -240,7 +240,7 @@ func registerFocusListTests(_ runner: TestRunner) {
             h.taskSource.unmovableIds = ["a"]
             await sync(h)
             try expect(list(of: "a", in: h.taskSource) == home)
-            await MainActor.run { h.board.snooze(signalId: "b", until: Date().addingTimeInterval(3600)) }
+            await MainActor.run { h.board.snoozes.snooze(signalId: "b", until: Date().addingTimeInterval(3600), dueAt: nil) }
             await sync(h, fetch: false)
             try expect(list(of: "b", in: h.taskSource) == home, "a snooze still takes it out")
         }

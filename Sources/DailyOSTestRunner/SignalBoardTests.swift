@@ -73,7 +73,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             await board.refreshReminders()
             try await MainActor.run {
                 let row = try require(board.rankedList(now: now).focus.first { $0.id == "r1" })
-                board.snooze(row, until: now.addingTimeInterval(3600))
+                board.snoozes.snooze(row, until: now.addingTimeInterval(3600))
                 let list = board.rankedList(now: now)
                 try expect(list.snoozed.map(\.id) == ["r1"])
                 try expect(!list.focus.contains { $0.id == "r1" } && !list.later.contains { $0.id == "r1" })
@@ -89,9 +89,9 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             try await MainActor.run {
                 let later = board.rankedList(now: now).later
                 let byId = Dictionary(uniqueKeysWithValues: later.map { ($0.id, $0) })
-                board.snooze(byId["r1"]!, until: now.addingTimeInterval(3 * 3600))
-                board.snooze(byId["r2"]!, until: now.addingTimeInterval(1 * 3600))
-                board.snooze(byId["r3"]!, until: now.addingTimeInterval(2 * 3600))
+                board.snoozes.snooze(byId["r1"]!, until: now.addingTimeInterval(3 * 3600))
+                board.snoozes.snooze(byId["r2"]!, until: now.addingTimeInterval(1 * 3600))
+                board.snoozes.snooze(byId["r3"]!, until: now.addingTimeInterval(2 * 3600))
                 try expect(board.rankedList(now: now).snoozed.map(\.id) == ["r2", "r3", "r1"])
             }
         }
@@ -100,7 +100,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
             await board.refreshReminders()
             try await MainActor.run {
-                board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 let later = board.rankedList(now: now.addingTimeInterval(3601))
                 try expect(later.snoozed.isEmpty)
                 try expect(later.later.map(\.id) == ["r1"])
@@ -113,7 +113,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             await board.refreshReminders()
             try await MainActor.run {
                 for row in board.rankedList(now: now).later.prefix(3) {
-                    board.snooze(row, until: now.addingTimeInterval(3600))
+                    board.snoozes.snooze(row, until: now.addingTimeInterval(3600))
                 }
                 let list = board.rankedList(now: now)
                 try expect(list.later.count == maxRankedSignals, "got \(list.later.count)")
@@ -125,8 +125,8 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
             await board.refreshReminders()
             try await MainActor.run {
-                board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
-                board.unsnooze(signalId: "r1")
+                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                board.snoozes.end(signalId: "r1")
                 let list = board.rankedList(now: now)
                 try expect(list.snoozed.isEmpty)
                 try expect(list.later.map(\.id) == ["r1"])
@@ -158,7 +158,7 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 try expect(board.rankedList(now: now).later.map(\.label) == ["Buy milk"])
-                board.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 try expect(board.rankedList(now: now).later.isEmpty, "a snoozed Signal should disappear on the next read alone")
             }
         }

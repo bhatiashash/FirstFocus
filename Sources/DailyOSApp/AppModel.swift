@@ -817,7 +817,7 @@ public final class AppModel: ObservableObject {
     /// doesn't start out hidden (ADR 0045).
     public func checkOff(_ signal: Signal) {
         undoBar.offer(.checkedOff, label: signal.label, .heldBack(hiding: signal.id) { [weak self] in
-            self?.board.unsnooze(signalId: signal.id)
+            self?.board.snoozes.end(signalId: signal.id)
             self?.checkOffCoordinator.commit(signal)
         })
     }
@@ -914,14 +914,14 @@ public final class AppModel: ObservableObject {
     /// store write plus a republish — `rankedList` reads `snoozedUntil`
     /// fresh on every call, so there's nothing to patch. No Undo bar.
     public func snooze(_ signal: Signal, until: Date) {
-        board.snooze(signal, until: until)
+        board.snoozes.snooze(signal, until: until)
         republish()
     }
 
     /// Unsnooze on a Snoozed row (ADR 0045): back to Focus or Later at
     /// once. No Undo bar; the row reappearing is the confirmation.
     public func unsnooze(_ signal: Signal) {
-        board.unsnooze(signalId: signal.id)
+        board.snoozes.end(signalId: signal.id)
         republish()
     }
 
@@ -929,15 +929,15 @@ public final class AppModel: ObservableObject {
     /// at 8:00 AM, judged by the injected clock. Written at once; Undo
     /// puts back whatever snooze the row had before, or none.
     public func snooze(_ signal: Signal, _ choice: SnoozeChoice) {
-        let previous = board.snoozedUntil(signalId: signal.id)
+        let previous = board.snoozes.until(signalId: signal.id)
         let until = snoozeEnd(choice, now: now())
         snooze(signal, until: until)
         undoBar.offer(.snoozed(until: until), label: signal.label, .reversible { [weak self] in
             guard let self else { return }
             if let previous {
-                self.board.snooze(signal, until: previous)
+                self.board.snoozes.snooze(signal, until: previous)
             } else {
-                self.board.unsnooze(signalId: signal.id)
+                self.board.snoozes.end(signalId: signal.id)
             }
             self.republish()
         })

@@ -78,7 +78,8 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
             createdAt: reminder.creationDate ?? .distantPast,
             notes: reminder.hasNotes ? reminder.notes : nil,
             url: reminder.url,
-            listId: reminder.calendar?.calendarIdentifier
+            listId: reminder.calendar?.calendarIdentifier,
+            isRecurring: reminder.hasRecurrenceRules
         )
     }
 

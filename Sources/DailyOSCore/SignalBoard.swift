@@ -22,6 +22,9 @@ import Foundation
 public final class SignalBoard {
     private let taskSource: any TaskSource
     private let signalStore: any SignalBoardStore
+    /// Every way a snooze starts and ends. The Board reads snoozes through
+    /// it and tells it about each Reminders fetch.
+    public let snoozes: Snoozes
 
     private var reminderSignals: [Signal] = []
     private var messageSignals: [Signal] = []
@@ -44,10 +47,12 @@ public final class SignalBoard {
     private var availabilities: [Source: SourceAvailability] = [:]
 
     public init(
-        taskSource: any TaskSource, signalStore: any SignalBoardStore, now: @escaping @MainActor () -> Date = { Date() }
+        taskSource: any TaskSource, signalStore: any SignalBoardStore & SnoozeStore,
+        now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.taskSource = taskSource
         self.signalStore = signalStore
+        self.snoozes = Snoozes(store: signalStore)
         self.now = now
     }
 
@@ -86,6 +91,7 @@ public final class SignalBoard {
         )
         remindersReadAt = fetch
         availabilities[.reminders] = .available
+        snoozes.remindersFetched(open: tasks, checkedOff: checkedOff)
     }
 
     /// Replaces the Messages share with what a Messages Intake pass
@@ -172,7 +178,7 @@ public final class SignalBoard {
         let signalIds = signals.map(\.id)
         let reminderIds = signals.filter { $0.source == .reminders }.map(\.sourceRef)
         let focusOrders = signalStore.focusOrders(signalIds: signalIds)
-        let snoozedUntils = signalStore.snoozedUntils(signalIds: signalIds)
+        let snoozedUntils = snoozes.untils(signalIds: signalIds)
         let approvedSenders = signalStore.approvedSenders(reminderIds: reminderIds)
         return signals.map { signal in
             var updated = signal
@@ -251,30 +257,6 @@ public final class SignalBoard {
         }
     }
 
-    /// Snooze (CONTEXT.md: Snoozed). Just the store write: `rankedList`'s
-    /// `hydrate` reads `snoozedUntil` fresh, and `isSnoozed` excludes it
-    /// from the very next call — no array to patch.
-    public func snooze(_ signal: Signal, until: Date) {
-        snooze(signalId: signal.id, until: until)
-    }
-
-    /// `snooze(_:until:)` by id, for a reminder Approve just made, which
-    /// the caller holds no Signal for yet.
-    public func snooze(signalId: String, until: Date) {
-        try? signalStore.snooze(signalId: signalId, until: until)
-    }
-
-    /// When `signalId`'s snooze ends, read from the store rather than a
-    /// Signal that may have been hydrated before the last snooze.
-    public func snoozedUntil(signalId: String) -> Date? {
-        signalStore.snoozedUntil(signalId: signalId)
-    }
-
-    /// Ends `signalId`'s snooze, so it goes back to Focus or Later.
-    public func unsnooze(signalId: String) {
-        try? signalStore.unsnooze(signalId: signalId)
-    }
-
     /// Manual Focus ordering (ADR 0011). `currentFocusIds` is the caller's
     /// own currently-visible Focus order (what `rankedList(...).focus`
     /// last returned) rather than something the Board re-derives, so a
@@ -302,7 +284,7 @@ public final class SignalBoard {
         let created: ReminderTask? = await Task.detached { try? taskSource.create(draft) }.value
         guard let created else { return nil }
         try? signalStore.approve(signalId: signal.id, reminderId: created.id)
-        if let snoozedUntil { snooze(signalId: created.id, until: snoozedUntil) }
+        if let snoozedUntil { snoozes.snooze(signalId: created.id, until: snoozedUntil, dueAt: created.dueAt) }
         if let sender = signal.sender, isResolvedSenderName(sender) {
             try? signalStore.recordApprovedSender(reminderId: created.id, sender: sender)
         }
@@ -319,7 +301,7 @@ public final class SignalBoard {
         let taskSource = self.taskSource
         await Task.detached { try? taskSource.delete(id: reminderId) }.value
         try? signalStore.forgetApprovedSender(reminderId: reminderId)
-        try? signalStore.unsnooze(signalId: reminderId)
+        snoozes.end(signalId: reminderId)
         try? signalStore.reopen(signalId: signalId)
         await refreshReminders()
     }
@@ -365,6 +347,7 @@ public final class SignalBoard {
         let taskSource = self.taskSource
         await Task.detached { try? taskSource.reopen(id: reminder.id) }.value
         try? signalStore.clearFocusOrder(signalId: reminder.id)
+        snoozes.end(signalId: reminder.id)
         await refreshReminders()
     }
 

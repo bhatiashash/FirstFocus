@@ -1,12 +1,12 @@
 import Foundation
 
-/// Signal durable state, in five protocols. Four are split along who
+/// Signal durable state, in six protocols. Five are split along who
 /// calls them (ADR 0021). The Batch Ledger is grouped around the Batch
 /// instead, because every one of its callers asks about Batches (ADR 0021,
-/// amended 2026-09-26). `SignalStore` composes all five back into the one
+/// amended 2026-09-26). `SignalStore` composes all six back into the one
 /// type `SQLiteSignalStore` implements in full; tests run against it too,
 /// on a file of their own.
-public protocol SignalStore: BatchLedger, MessagesIntakeState, SignalBoardStore, CheckOffStore, FocusListStore {}
+public protocol SignalStore: BatchLedger, MessagesIntakeState, SignalBoardStore, CheckOffStore, FocusListStore, SnoozeStore {}
 
 /// The durable record of what Extraction produced from each Batch.
 /// Load-bearing rather than convenient: Extraction never re-runs on a
@@ -311,23 +311,6 @@ public protocol SignalBoardStore: Sendable {
     /// Sender recorded against it. A no-op if none was.
     func forgetApprovedSender(reminderId: String) throws
 
-    /// Snooze (ticket 04, ADR 0045): the moment before which `signalId` should
-    /// stay off the ranked list, or `nil` if it's never been snoozed.
-    /// Keyed by Signal id independent of source — the same posture
-    /// `focusOrder` already takes, and for the same reason: a
-    /// Reminders-sourced Signal is never itself a persisted row in
-    /// `signals`, so this can't live there either.
-    func snoozedUntil(signalId: String) -> Date?
-
-    /// Records `until` as the moment `signalId` should reappear on the
-    /// ranked list, overwriting any previous snooze for the same id.
-    /// Never writes to the underlying Source — see CONTEXT.md: Snoozed.
-    func snooze(signalId: String, until: Date) throws
-
-    /// Ends `signalId`'s snooze, if it has one (ADR 0045: Unsnooze, and
-    /// a check-off clearing it).
-    func unsnooze(signalId: String) throws
-
     /// `focusOrder(signalId:)`, batched: every entry in `signalIds` that
     /// has a manual Focus order, keyed by its own id. An id with no entry
     /// is simply absent from the result rather than mapped to `nil` — the
@@ -336,12 +319,39 @@ public protocol SignalBoardStore: Sendable {
     /// of once per Signal, the shape every other lookup here already has.
     func focusOrders(signalIds: [String]) -> [String: Int]
 
-    /// `snoozedUntil(signalId:)`, batched — see `focusOrders(signalIds:)`.
-    func snoozedUntils(signalIds: [String]) -> [String: Date]
-
     /// `approvedSender(reminderId:)`, batched — see `focusOrders(signalIds:)`.
     func approvedSenders(reminderIds: [String]) -> [String: String]
 
+}
+
+/// Snooze's record (ticket 04, ADR 0045), whose one caller is the Snooze
+/// module (`Snoozes`). Keyed by Signal id independent of source: a
+/// Reminders Signal is never itself a row in `signals`, so this can't live
+/// there. Never writes to the underlying Source (CONTEXT.md: Snoozed).
+public protocol SnoozeStore: Sendable {
+    /// The moment before which `signalId` stays off the Ranked List, or
+    /// `nil` if it isn't snoozed.
+    func snoozedUntil(signalId: String) -> Date?
+
+    /// `snoozedUntil(signalId:)`, batched: an id with no snooze is absent.
+    func snoozedUntils(signalIds: [String]) -> [String: Date]
+
+    /// The due date each Snoozed reminder had when it was snoozed, for those
+    /// in `signalIds` that had one.
+    func snoozedDueDates(signalIds: [String]) -> [String: Date]
+
+    /// Snoozes `signalId` until `until`, replacing any snooze it had, and
+    /// keeps the due date it has now.
+    func snooze(signalId: String, until: Date, dueAt: Date?) throws
+
+    /// Ends `signalId`'s snooze, if it has one.
+    func unsnooze(signalId: String) throws
+}
+
+public extension SnoozeStore {
+    func snooze(signalId: String, until: Date) throws {
+        try snooze(signalId: signalId, until: until, dueAt: nil)
+    }
 }
 
 /// The Focus list's record (ADR 0048): the reminders that were in it at

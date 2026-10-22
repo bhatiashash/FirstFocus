@@ -426,11 +426,39 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         }, map: { text($0, 0) }).flatMap { dateFormatter.date(from: $0) }
     }
 
-    public func snooze(signalId: String, until: Date) throws {
-        try execute("INSERT OR REPLACE INTO snoozes (signal_id, snoozed_until) VALUES (?, ?)") {
+    public func snooze(signalId: String, until: Date, dueAt: Date?) throws {
+        try execute("INSERT OR REPLACE INTO snoozes (signal_id, snoozed_until, due_at) VALUES (?, ?, ?)") {
             sqlite3_bind_text($0, 1, signalId, -1, sqliteTransient)
             sqlite3_bind_text($0, 2, dateFormatter.string(from: until), -1, sqliteTransient)
+            if let dueAt {
+                sqlite3_bind_text($0, 3, dateFormatter.string(from: dueAt), -1, sqliteTransient)
+            } else {
+                sqlite3_bind_null($0, 3)
+            }
         }
+    }
+
+    public func snoozedDueDates(signalIds: [String]) -> [String: Date] {
+        guard !signalIds.isEmpty else { return [:] }
+        guard let db = open() else { return [:] }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let placeholders = Array(repeating: "?", count: signalIds.count).joined(separator: ", ")
+        guard sqlite3_prepare_v2(
+            db, "SELECT signal_id, due_at FROM snoozes WHERE due_at IS NOT NULL AND signal_id IN (\(placeholders))", -1,
+            &statement, nil
+        ) == SQLITE_OK, let statement else { return [:] }
+        for (index, signalId) in signalIds.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), signalId, -1, sqliteTransient)
+        }
+        var results: [String: Date] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let signalId = text(statement, 0), let dateText = text(statement, 1), let date = dateFormatter.date(from: dateText) {
+                results[signalId] = date
+            }
+        }
+        return results
     }
 
     public func unsnooze(signalId: String) throws {
@@ -974,6 +1002,7 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
             && addColumnIfMissing(db, table: "signals", column: "chat_id", type: "INTEGER")
             && addColumnIfMissing(db, table: "signals", column: "superseded_by", type: "TEXT")
             && addColumnIfMissing(db, table: "signals", column: "dismissed_by_not_for_me", type: "INTEGER")
+            && addColumnIfMissing(db, table: "snoozes", column: "due_at", type: "TEXT")
     }
 
     /// This SQLite build's `ALTER TABLE ... ADD COLUMN` has no

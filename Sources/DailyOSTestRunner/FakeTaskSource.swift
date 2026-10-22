@@ -69,7 +69,21 @@ final class FakeTaskSource: TaskSource, @unchecked Sendable {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else {
             throw TaskSourceError.taskNotFound(id: id)
         }
-        let task = tasks.remove(at: index)
+        let task = tasks[index]
+        if task.isRecurring {
+            // What EventKit does: the reminder keeps its id and stays open
+            // with its due date on the next occurrence, and a completed copy
+            // with an id of its own records this one.
+            let next = task.dueAt.map { $0.addingTimeInterval(24 * 60 * 60) }
+            tasks[index] = copy(of: task, dueAt: next)
+            checkedOff.append(CheckedOffReminder(
+                task: copy(of: task, id: "\(id)-done-\(nextId)"), checkedOffAt: Date(), isRecurring: true
+            ))
+            nextId += 1
+            completedIds.append(id)
+            return
+        }
+        tasks.remove(at: index)
         checkedOff.append(CheckedOffReminder(task: task, checkedOffAt: Date()))
         completedIds.append(id)
     }
@@ -157,7 +171,14 @@ final class FakeTaskSource: TaskSource, @unchecked Sendable {
         }
         tasks[index] = ReminderTask(
             id: task.id, title: title, dueAt: dueAt, priority: priority, createdAt: task.createdAt,
-            notes: task.notes, url: task.url, listId: listId
+            notes: task.notes, url: task.url, listId: listId, isRecurring: task.isRecurring
+        )
+    }
+
+    private func copy(of task: ReminderTask, id: String? = nil, dueAt: Date?? = .none) -> ReminderTask {
+        ReminderTask(
+            id: id ?? task.id, title: task.title, dueAt: dueAt ?? task.dueAt, priority: task.priority,
+            createdAt: task.createdAt, notes: task.notes, url: task.url, listId: task.listId, isRecurring: task.isRecurring
         )
     }
 
