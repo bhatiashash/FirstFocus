@@ -111,6 +111,7 @@ func registerExtractionFailureTests(_ runner: TestRunner) {
             let app = await MainActor.run {
                 makeHistoryApp(messages: [message("m1", "can you pick up the cake")], extractor: extractor)
             }
+            await app.model.extraction.load()
             try app.history.record(failed)
             try app.signals.recordOneMessageBatch("m1", signals: [])
             let batch = try await MainActor.run { () -> HistoryBatch in

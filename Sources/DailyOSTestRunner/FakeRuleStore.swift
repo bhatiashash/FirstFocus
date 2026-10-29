@@ -26,9 +26,3 @@ final class FakeRuleStore: RuleStore, @unchecked Sendable {
         stored.removeAll { $0.id == id }
     }
 }
-
-@MainActor
-final class FakeRulesConfiguring: RulesConfiguring {
-    private(set) var applyCount = 0
-    func applyRules() { applyCount += 1 }
-}

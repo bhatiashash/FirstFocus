@@ -198,7 +198,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     d.dayChanges = FakeDayChangeObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: morningBriefDefaults())
                     d.reExtractionSettings = ReExtractionSettings(defaults: morningBriefDefaults())
-                    d.extractor = FakeIntentExtractor()
+                    d.loadModel = { _, _ in FakeIntentExtractor() }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()
@@ -234,7 +234,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     d.dayChanges = FakeDayChangeObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: morningBriefDefaults())
                     d.reExtractionSettings = ReExtractionSettings(defaults: morningBriefDefaults())
-                    d.extractor = FakeIntentExtractor()
+                    d.loadModel = { _, _ in FakeIntentExtractor() }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()

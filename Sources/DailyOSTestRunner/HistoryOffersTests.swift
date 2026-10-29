@@ -101,12 +101,13 @@ func registerHistoryOffersTests(_ runner: TestRunner) {
 
     runner.suite("history-snapshot: History draws from one read, and actions check again") { r in
         r.run("the list and each Batch's offers come from the same refresh") {
-            let (app, viewModel) = try await MainActor.run { () -> (HistoryApp, HistoryViewModel) in
-                let app = makeHistoryApp()
+            let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
+            let viewModel = try await MainActor.run { () -> HistoryViewModel in
                 try app.history.record(screenedRow("screened"))
                 let viewModel = app.viewModel()
                 viewModel.showsUnfilteredLog = true
-                return (app, viewModel)
+                return viewModel
             }
             try await MainActor.run {
                 let batch = try require(viewModel.batches.first { $0.id == "screened" })
@@ -116,15 +117,16 @@ func registerHistoryOffersTests(_ runner: TestRunner) {
         }
 
         r.run("a button drawn before the Screening toggle went off does nothing when clicked") {
-            let (app, batch) = try await MainActor.run { () -> (HistoryApp, HistoryBatch) in
-                let app = makeHistoryApp()
+            let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
+            let batch = try await MainActor.run { () -> HistoryBatch in
                 try app.history.record(screenedRow("screened"))
                 let viewModel = app.viewModel()
                 viewModel.showsUnfilteredLog = true
                 let batch = try require(viewModel.batches.first { $0.id == "screened" })
                 try expect(viewModel.offers(for: batch)[.thisWasWork] == .enabled)
                 app.screeningSettings.isEnabled = false
-                return (app, batch)
+                return batch
             }
             await app.actions.thisWasWork(batch)
             let recorded = await MainActor.run { app.model.corrections.types(forBatches: ["screened"]) }
@@ -134,12 +136,13 @@ func registerHistoryOffersTests(_ runner: TestRunner) {
 
     runner.suite("history-snapshot: History refreshes when what it reads changes") { r in
         r.run("flipping the Screening toggle in Settings refreshes the segments and buttons together") {
+            let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, settings, batch) = try await MainActor.run { () -> (HistoryViewModel, ScreeningSettingsViewModel, HistoryBatch) in
-                let app = makeHistoryApp()
                 try app.history.record(screenedRow("screened"))
                 let viewModel = app.viewModel()
                 viewModel.showsUnfilteredLog = true
-                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), app: app.model)
+                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), extraction: app.model.extraction)
                 return (viewModel, settings, try require(viewModel.batches.first { $0.id == "screened" }))
             }
             try await MainActor.run {
@@ -162,7 +165,7 @@ func registerHistoryOffersTests(_ runner: TestRunner) {
                 return (app, viewModel, try require(viewModel.batches.first { $0.id == "screened" }))
             }
             try await MainActor.run {
-                app.model.unloadExtractor()
+                app.model.extraction.unload()
                 try expect(viewModel.offers(for: batch)[.thisWasWork] == .unavailable(reason: noModelLoadedReason))
             }
         }

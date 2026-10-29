@@ -16,16 +16,16 @@ public final class ModelsViewModel: ObservableObject {
 
     private let modelDownloader: any ModelDownloading
     private let extractionSettings: ExtractionSettings
-    private let model: any ExtractionReloading
+    private let extraction: ExtractionHost
     private let bundleIdentifier: String
 
     public init(
         modelDownloader: any ModelDownloading, extractionSettings: ExtractionSettings,
-        model: any ExtractionReloading, bundleIdentifier: String
+        extraction: ExtractionHost, bundleIdentifier: String
     ) {
         self.modelDownloader = modelDownloader
         self.extractionSettings = extractionSettings
-        self.model = model
+        self.extraction = extraction
         self.bundleIdentifier = bundleIdentifier
     }
 
@@ -107,7 +107,7 @@ public final class ModelsViewModel: ObservableObject {
     public func delete(_ entry: ModelCatalogEntry) throws {
         let wasActive = isActive(entry)
         try FileManager.default.removeItem(atPath: entry.localPath(bundleIdentifier: bundleIdentifier))
-        if wasActive { model.unloadExtractor() }
+        if wasActive { extraction.unload() }
         objectWillChange.send()
     }
 
@@ -131,7 +131,7 @@ public final class ModelsViewModel: ObservableObject {
     private func switchModel(to path: String) async {
         extractionSettings.modelPathOverride = path
         objectWillChange.send()
-        await model.applyExtractionSettingsChange()
+        await extraction.applySettingsChange()
         objectWillChange.send()
     }
 }

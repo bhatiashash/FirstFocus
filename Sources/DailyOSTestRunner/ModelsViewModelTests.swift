@@ -3,14 +3,9 @@ import DailyOSApp
 import DailyOSCore
 import Foundation
 
-/// `select(_:)`/`chooseCustomFile(_:)` used to be untestable outright:
-/// taking the whole `AppModel` meant both ended in the real
-/// `applyExtractionSettingsChange()`, which drops whatever extractor is
-/// loaded — including a test's injected `FakeIntentExtractor` — and reads a
-/// real `.gguf` off disk, something `AppModel.loadExtractor()`'s own doc
-/// comment calls "a test must never do". Reaching that reload through the
-/// `ExtractionReloading` seam instead lets `FakeExtractionReloader` stand
-/// in for it, so both paths are covered below.
+/// `select(_:)` and `chooseCustomFile(_:)` reload the model through a real
+/// `ExtractionHost` whose loader is a test's (`TestExtraction`), so no test
+/// reads a real `.gguf` off disk.
 private final class ChangeCounter: @unchecked Sendable {
     var count = 0
     var subscription: AnyCancellable?
@@ -29,13 +24,13 @@ private func cleanUp(bundleIdentifier: String) {
 @MainActor
 private func makeViewModel(
     bundleIdentifier: String, downloader: FakeModelDownloader = FakeModelDownloader(),
-    reloader: FakeExtractionReloader = FakeExtractionReloader(),
+    reloader: TestExtraction = TestExtraction(),
     extractionSettings: ExtractionSettings? = nil
 ) -> ModelsViewModel {
     let defaults = UserDefaults(suiteName: "dailyos-tests-models-viewmodel-\(UUID().uuidString)")!
     return ModelsViewModel(
         modelDownloader: downloader, extractionSettings: extractionSettings ?? ExtractionSettings(defaults: defaults),
-        model: reloader, bundleIdentifier: bundleIdentifier
+        extraction: reloader.host, bundleIdentifier: bundleIdentifier
     )
 }
 
@@ -184,15 +179,15 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
             FileManager.default.createFile(atPath: entry.localPath(bundleIdentifier: bundleIdentifier), contents: Data())
             let settings = ExtractionSettings(defaults: UserDefaults(suiteName: "dailyos-tests-models-delete-\(UUID().uuidString)")!)
             settings.modelPathOverride = entry.localPath(bundleIdentifier: bundleIdentifier)
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run {
                 makeViewModel(bundleIdentifier: bundleIdentifier, reloader: reloader, extractionSettings: settings)
             }
 
             try await MainActor.run {
                 try viewModel.delete(entry)
-                try expect(reloader.unloadCount == 1)
-                try expect(reloader.applyCount == 0, "a deleted model must not be reloaded")
+                try expect(reloader.host.isUnavailable, "the model is unloaded")
+                try expect(reloader.log.loads == 0, "a deleted model must not be reloaded")
             }
         }
 
@@ -203,12 +198,12 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
             let directory = LlamaCppIntentExtractor.modelsDirectoryURL(bundleIdentifier: bundleIdentifier)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             FileManager.default.createFile(atPath: entry.localPath(bundleIdentifier: bundleIdentifier), contents: Data())
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run { makeViewModel(bundleIdentifier: bundleIdentifier, reloader: reloader) }
 
             try await MainActor.run {
                 try viewModel.delete(entry)
-                try expect(reloader.unloadCount == 0)
+                try expect(!reloader.host.isUnavailable)
             }
         }
 
@@ -218,7 +213,7 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
             let entry = try require(ModelCatalog.entries.first)
             let defaults = UserDefaults(suiteName: "dailyos-tests-models-select-\(UUID().uuidString)")!
             let settings = ExtractionSettings(defaults: defaults)
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run {
                 makeViewModel(bundleIdentifier: bundleIdentifier, reloader: reloader, extractionSettings: settings)
             }
@@ -227,7 +222,7 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
 
             try expect(settings.modelPathOverride == entry.localPath(bundleIdentifier: bundleIdentifier))
             try await MainActor.run {
-                try expect(reloader.applyCount == 1, "selecting a model must reload the extractor exactly once")
+                try expect(reloader.log.loads == 1, "selecting a model must reload the extractor exactly once")
             }
         }
 
@@ -253,7 +248,7 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
             defer { cleanUp(bundleIdentifier: bundleIdentifier) }
             let defaults = UserDefaults(suiteName: "dailyos-tests-models-custom-\(UUID().uuidString)")!
             let settings = ExtractionSettings(defaults: defaults)
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run {
                 makeViewModel(bundleIdentifier: bundleIdentifier, reloader: reloader, extractionSettings: settings)
             }
@@ -262,7 +257,7 @@ func registerModelsViewModelTests(_ runner: TestRunner) {
             await viewModel.chooseCustomFile(chosen)
 
             try expect(settings.modelPathOverride == chosen.path)
-            try await MainActor.run { try expect(reloader.applyCount == 1) }
+            try await MainActor.run { try expect(reloader.log.loads == 1) }
         }
     }
 }

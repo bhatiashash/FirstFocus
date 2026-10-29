@@ -48,7 +48,7 @@ func registerReviewFixTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = extractor
+                    d.loadModel = { _, _ in extractor }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = corrections
                     d.apiKeyStore = FakeAPIKeyStore()
@@ -58,10 +58,10 @@ func registerReviewFixTests(_ runner: TestRunner) {
                 return Harness(model: model, extractor: extractor, corrections: corrections, rules: rules)
             }
             await h.model.start()
-            let proposed = await h.model.proposeRules()
+            let proposed = await h.model.extraction.proposeRules()
             try expect(proposed.isEmpty)
             try expect(h.rules.proposalWatermark == nil, "nothing was proposed, so nothing was used up")
-            let status = await MainActor.run { h.model.ruleProposalStatus() }
+            let status = await MainActor.run { h.model.extraction.ruleProposalStatus() }
             try expect(status == .ready(newCorrections: 5))
         }
 

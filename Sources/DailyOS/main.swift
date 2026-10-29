@@ -273,13 +273,13 @@ appDelegate.beforeQuit = { model.prepareToQuit() }
 // in the one window that's always open, there's no "opening" event left
 // to rebuild on — they're constructed once, like `model` itself.
 let settingsViewModel = SettingsViewModel(
-    extractionSettings: extractionSettings, reExtractionSettings: reExtractionSettings, model: model
+    extractionSettings: extractionSettings, reExtractionSettings: reExtractionSettings, extraction: model.extraction
 )
 let historyViewModel = HistoryViewModel(historyStore: historyStore, actions: model.historyActions)
-let rulesViewModel = RulesViewModel(store: ruleStore, app: model, proposer: model)
+let rulesViewModel = RulesViewModel(store: ruleStore, extraction: model.extraction)
 let mutedChatsViewModel = MutedChatsViewModel(actions: model.historyActions, historyStore: historyStore)
 let screeningViewModel = ScreeningSettingsViewModel(
-    settings: screeningSettings, keyStore: apiKeyStore, app: model, historyStore: historyStore,
+    settings: screeningSettings, keyStore: apiKeyStore, extraction: model.extraction, historyStore: historyStore,
     correctionLog: dependencies.correctionStore
 )
 // Morning Brief (ADR 0046): one preference and one delivery, shared by
@@ -308,7 +308,7 @@ NSWorkspace.shared.notificationCenter.addObserver(
 }
 let openAtLoginViewModel = OpenAtLoginViewModel(loginItem: MainAppLoginItem())
 let modelsViewModel = ModelsViewModel(
-    modelDownloader: modelDownloader, extractionSettings: extractionSettings, model: model,
+    modelDownloader: modelDownloader, extractionSettings: extractionSettings, extraction: model.extraction,
     bundleIdentifier: bundleIdentifier
 )
 

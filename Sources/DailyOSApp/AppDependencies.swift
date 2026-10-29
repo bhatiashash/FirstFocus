@@ -24,9 +24,9 @@ public struct AppDependencies {
     public var reExtractionSettings: ReExtractionSettings
     public var undoClock: any UndoClock
     public var undoWindow: TimeInterval
-    /// One supplied here is taken as final and nothing is loaded; `nil`
-    /// makes `start()` load the model from disk.
-    public var extractor: (any IntentExtractor)?
+    /// How the extraction model loads: the llama.cpp model from disk in
+    /// the app, a fake in tests, so a test never reads a real model.
+    public var loadModel: ExtractionHost.Loader
     public var historyStore: any HistoryStore
     public var participantLabelStore: any ParticipantLabelStore
     public var correctionStore: any CorrectionStore
@@ -51,7 +51,7 @@ public struct AppDependencies {
         zenFocusModePreference: ZenFocusModePreference, captureHotkeyPreference: CaptureHotkeyPreference,
         focusListPreference: FocusListPreference, extractionSettings: ExtractionSettings,
         reExtractionSettings: ReExtractionSettings, undoClock: any UndoClock, undoWindow: TimeInterval,
-        extractor: (any IntentExtractor)?, historyStore: any HistoryStore, participantLabelStore: any ParticipantLabelStore,
+        loadModel: @escaping ExtractionHost.Loader, historyStore: any HistoryStore, participantLabelStore: any ParticipantLabelStore,
         correctionStore: any CorrectionStore, screeningSettings: ScreeningSettings, filteredSMSSettings: FilteredSMSSettings,
         apiKeyStore: any APIKeyStore, makeScreener: @escaping @Sendable (String) -> any Screener, ruleStore: any RuleStore,
         batchWakeClock: any UndoClock, auditRoll: @escaping @Sendable () -> Double, now: @escaping @MainActor () -> Date,
@@ -74,7 +74,7 @@ public struct AppDependencies {
         self.reExtractionSettings = reExtractionSettings
         self.undoClock = undoClock
         self.undoWindow = undoWindow
-        self.extractor = extractor
+        self.loadModel = loadModel
         self.historyStore = historyStore
         self.participantLabelStore = participantLabelStore
         self.correctionStore = correctionStore
@@ -116,7 +116,7 @@ public struct AppDependencies {
             reExtractionSettings: ReExtractionSettings(),
             undoClock: TaskSleepUndoClock(),
             undoWindow: 5,
-            extractor: nil,
+            loadModel: llamaExtractorLoader,
             historyStore: SQLiteHistoryStore(path: SQLiteHistoryStore.defaultPath(bundleIdentifier: bundleIdentifier)),
             participantLabelStore: SQLiteParticipantLabelStore(
                 path: SQLiteParticipantLabelStore.defaultPath(bundleIdentifier: bundleIdentifier)

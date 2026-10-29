@@ -115,7 +115,7 @@ func registerScreeningHistogramTests(_ runner: TestRunner) {
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
             let viewModel = await MainActor.run {
                 ScreeningSettingsViewModel(
-                    settings: settings, keyStore: FakeAPIKeyStore(), app: FakeScreeningConfiguring(), historyStore: history,
+                    settings: settings, keyStore: FakeAPIKeyStore(), extraction: TestExtraction().host, historyStore: history,
                     correctionLog: corrections
                 )
             }

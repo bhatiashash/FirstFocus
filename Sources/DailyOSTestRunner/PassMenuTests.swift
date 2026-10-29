@@ -39,7 +39,7 @@ private func makeModel(extractor: GatedIntentExtractor, m1AlreadyProcessed: Bool
         d.foregroundObserver = FakeForegroundObserver()
         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
         d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-        d.extractor = extractor
+        d.loadModel = { _, _ in extractor }
         d.historyStore = makeTestHistoryStore()
         d.correctionStore = corrections
         d.screeningSettings = screeningOn(defaults)
@@ -72,14 +72,14 @@ func registerPassMenuTests(_ runner: TestRunner) {
                 try expect(model.runningMessagesPass == .automatic)
                 try expect(model.reExtractionMenuTitle == "Checking Messages…")
                 try expect(!model.canReExtract)
-                try expect(model.ruleProposalStatus() == .passRunning)
+                try expect(model.extraction.ruleProposalStatus() == .passRunning)
             }
             extractor.open()
             await launch.value
             try await MainActor.run {
                 try expect(model.runningMessagesPass == nil)
                 try expect(model.reExtractionMenuTitle == "Re-run Extraction")
-                try expect(model.ruleProposalStatus() == .ready(newCorrections: minimumCorrectionsForProposal))
+                try expect(model.extraction.ruleProposalStatus() == .ready(newCorrections: minimumCorrectionsForProposal))
             }
         }
 
@@ -93,7 +93,7 @@ func registerPassMenuTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try expect(model.runningMessagesPass == .reExtraction)
                 try expect(model.reExtractionMenuTitle == "Re-extracting…")
-                try expect(model.ruleProposalStatus() == .passRunning)
+                try expect(model.extraction.ruleProposalStatus() == .passRunning)
             }
             extractor.open()
             await reExtracting.value
@@ -111,7 +111,7 @@ func registerPassMenuTests(_ runner: TestRunner) {
                 try expect(model.runningMessagesPass == .explicit)
                 try expect(model.reExtractionMenuTitle == "Checking a Batch…")
                 try expect(!model.canReExtract)
-                try expect(model.ruleProposalStatus() == .passRunning)
+                try expect(model.extraction.ruleProposalStatus() == .passRunning)
             }
             extractor.open()
             await checking.value

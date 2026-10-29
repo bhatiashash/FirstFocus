@@ -24,8 +24,8 @@ func registerOutputPrefixAndCutoffTests(_ runner: TestRunner) {
     runner.suite("Screening cutoff is stored to two decimal places") { r in
         r.run("floating-point drift from the stepper is rounded away") {
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
-            let app = await MainActor.run { FakeScreeningConfiguring() }
-            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: FakeAPIKeyStore(), app: app) }
+            let app = await MainActor.run { TestExtraction() }
+            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: FakeAPIKeyStore(), extraction: app.host) }
             await MainActor.run { viewModel.setCutoff(0.4999999999999996) }
             try expect(settings.cutoff == 0.5, "got \(String(describing: settings.cutoff))")
             let shown = await MainActor.run { viewModel.cutoff }

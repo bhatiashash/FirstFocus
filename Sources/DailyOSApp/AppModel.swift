@@ -34,7 +34,7 @@ private let chatDBPollIntervalSeconds: TimeInterval = 60
 public final class AppModel: ObservableObject {
     /// The window's whole reason to exist (ADR 0020): derived fresh from
     /// `board.rankedList(now:hiding:)` by `republish()`, never patched in
-    /// place. `sections` is what the window draws from it.
+    /// place. `presentation` is what the window draws from it.
     @Published public private(set) var rankedList = RankedList(focus: [], later: [], suggested: [])
     /// The Checked Off sheet's rows, derived alongside `rankedList`.
     @Published public private(set) var checkedOff: [CheckedOffReminder] = []
@@ -45,7 +45,7 @@ public final class AppModel: ObservableObject {
     /// only under the list or the empty screen, and never in Zen, whose
     /// own empty screen is `.empty` too (CONTEXT.md: Checked Off).
     public var showsCheckedOffCount: Bool {
-        hasCheckedOffToShow && (screenMode == .list || screenMode == .empty)
+        hasCheckedOffToShow && (presentation.screenMode == .list || presentation.screenMode == .empty)
     }
     /// Something checked off today, and not in Zen, which shows only
     /// active work.
@@ -57,16 +57,15 @@ public final class AppModel: ObservableObject {
     /// `toggleCheckedOffSheet()`. Nothing closes it on its own when it
     /// empties, so it never vanishes from under the user.
     @Published public var isCheckedOffSheetPresented = false
-    /// Which of the five screens the window shows, and the Sections a
-    /// `.list` or `.zen` screen draws. Worked out here, in `republish()`
-    /// and whenever one of their inputs changes, so the view only reads
-    /// them.
     /// The ids of the Suggestions the Inbox offers "Not for me" on
     /// (inbox-not-for-me). Worked out when the list republishes and when
     /// History's actions change something, never per render.
     @Published public private(set) var notForMeOffers: Set<String> = []
-    @Published public private(set) var screenMode: ScreenMode = .loading
-    @Published public private(set) var sections: [DailyOSCore.Section] = []
+    /// Everything the window asks about the list (list-presentation): the
+    /// screen, its Sections, each row's actions and what a drop does.
+    /// Rebuilt by `updatePresentation()` whenever the list or a flag it
+    /// reads changes, so views only read it.
+    @Published public private(set) var presentation: ListPresentation
     /// The moment `rankedList` was ranked against. Every gesture on the
     /// list is judged against this rather than a fresh clock read, so just
     /// after midnight a drop or a row's actions follow the Tiers on
@@ -84,12 +83,13 @@ public final class AppModel: ObservableObject {
     private var snoozeWake: (at: Date, token: Int)?
     private var snoozeWakeToken = 0
     @Published public var isLoading = true {
-        didSet { updateScreen() }
+        didSet { updatePresentation() }
     }
     /// The Undo bar's offer (CONTEXT.md: Undo bar), or `nil` when the bar
-    /// is hidden. A mirror of `undoBar.current` for SwiftUI's sake.
+    /// is hidden. A mirror of `verbs.currentOffer` for SwiftUI's sake.
     @Published public private(set) var undoOffer: UndoOffer?
-    private let undoBar: UndoBar
+    /// Every verb that writes Signal state, with its Undo (signal-verbs).
+    private let verbs: SignalVerbs
     /// Owned here rather than as `ContentView` local `@State` because the
     /// trailing-edge toolbar buttons are hosted in a separate view
     /// hierarchy (their own `NSToolbarItem`, not a `ContentView`
@@ -105,11 +105,12 @@ public final class AppModel: ObservableObject {
     /// Shows Messages as Unavailable from launch until the first pass
     /// reads Messages and finds out for itself.
     private var messagesIdentityMismatch = false
-    @Published public var extractionUnavailable = false {
-        didSet { updateScreen() }
+    /// Read from `extraction` whenever it changes.
+    @Published public private(set) var extractionUnavailable = false {
+        didSet { updatePresentation() }
     }
     @Published public var backfillProgress: (completed: Int, total: Int)? {
-        didSet { updateScreen() }
+        didSet { updatePresentation() }
     }
     /// Which kind of Messages pass is running (ADR 0034), `nil` when none
     /// is: the input behind Re-extract being disabled rather than queueing
@@ -144,7 +145,7 @@ public final class AppModel: ObservableObject {
             if isZenFocusModeEnabled {
                 isCheckedOffSheetPresented = false
             }
-            updateScreen()
+            updatePresentation()
         }
     }
     /// Zen Focus Mode's content-hugging window sizing: the natural height
@@ -191,8 +192,6 @@ public final class AppModel: ObservableObject {
     private let taskSource: any TaskSource
     private let contactsResolver: any ContactsResolver
     private let board: SignalBoard
-    /// Writes a check-off once the Undo bar lets it go.
-    private let checkOffCoordinator: CheckOffCoordinator
     private let settingsOpener: any SettingsOpener
     private let refreshClock: any RefreshClock
     private let eventKitChanges: any EventKitChangeObserver
@@ -204,11 +203,6 @@ public final class AppModel: ObservableObject {
     /// Keeps the Focus list in Reminders in line with the Focus Tier
     /// (ADR 0048), told each time the list is derived.
     private let focusList: FocusList
-    /// Extraction settings (ticket 04): the prompt and model path
-    /// `loadExtractor()` reads instead of always using the built-in
-    /// defaults. Injectable the same way every other preference wrapper
-    /// here is, so a test can point at an isolated `UserDefaults` suite.
-    private let extractionSettings: ExtractionSettings
     /// Re-extraction's own scope and cooldown: `reExtract()` and
     /// `canReExtract` both read this instead of the old fixed "unbounded,
     /// no cooldown" behavior.
@@ -225,8 +219,8 @@ public final class AppModel: ObservableObject {
     /// `ModelsViewModel`, the only thing that ever touches it.
     private let historyStore: any HistoryStore
     /// Mute Thread (ADR 0032) and Restore (superseded-restore): handed to
-    /// `historyActions` without widening what `board` or
-    /// `checkOffCoordinator` are handed, since neither needs this state.
+    /// `historyActions` without widening what `board` or `verbs` are
+    /// handed, since neither needs this state.
     private let signalStore: any BatchLedger & MessagesIntakeState
     /// Corrections (ADR 0031): what each History action records, which
     /// Batches are corrected, and what Rule proposals learn from. Held here
@@ -237,36 +231,23 @@ public final class AppModel: ObservableObject {
     /// Every action on a History Batch (ADR 0031, 0032, 0036), handed to
     /// History's view model.
     public private(set) lazy var historyActions = HistoryBatchActions(
-        app: self, intake: intake, historyStore: historyStore, signalStore: signalStore, corrections: corrections,
+        app: self, board: board, intake: intake, historyStore: historyStore, signalStore: signalStore, corrections: corrections,
         screeningSettings: screeningSettings
     )
     /// Screening (ADR 0036): the preferences, the Keychain-backed key, and
     /// how to build a Screener from a key. The last is a seam so a test
     /// never makes a network call.
     private let screeningSettings: ScreeningSettings
-    private let apiKeyStore: any APIKeyStore
-    private let makeScreener: @Sendable (String) -> any Screener
-    /// Wraps the Screener intake is given, and outlives passes so an outage
-    /// found by one pass spares the next (screening-optional). Rebuilt,
-    /// which closes it, when the toggle or key changes; kept with the key
-    /// its Screener was built from, so a new key always gets its own.
-    private var screeningBreaker: (key: String, breaker: ScreeningBreaker)?
-    /// Approved Rules (ADR 0038), handed to the extractor whenever one is
-    /// loaded and whenever the set changes.
-    private let ruleStore: any RuleStore
+    /// The extraction model, its Rules, Rule proposals and Screening
+    /// (extraction-host). Settings view models take it directly.
+    public let extraction: ExtractionHost
 
     private var isReExtracting = false
     private var refreshCoordinator: RefreshCoordinator?
-    /// `deleteTask`'s own optimistic hiding. A check-off is hidden by the
-    /// Undo bar while offered and by `checkOffCoordinator` while written.
-    private var deletingSignalIDs: Set<String> = []
-
     /// Excluded from every `republish()` before dedup, tiering or the
-    /// Later cap ever sees them. The Signal Board never learns why any
-    /// of them are hidden.
-    private var hidingIDs: Set<String> {
-        undoBar.hiddenIDs.union(checkOffCoordinator.hiddenIDs).union(deletingSignalIDs)
-    }
+    /// Later cap ever sees them. Neither the Signal Board nor AppModel
+    /// learns why any of them are hidden.
+    private var hidingIDs: Set<String> { verbs.hiddenIDs }
 
     /// Built only from `dependencies`, which carries no defaults: the
     /// executable passes `AppDependencies.live(...)` and a test passes a
@@ -279,7 +260,7 @@ public final class AppModel: ObservableObject {
             messagesSource: dependencies.messagesSource, signalStore: dependencies.signalStore,
             contactsResolver: dependencies.contactsResolver, bundlePath: dependencies.bundlePath,
             participantLabelStore: dependencies.participantLabelStore, historyStore: dependencies.historyStore,
-            correctionStore: dependencies.correctionStore, extractor: dependencies.extractor,
+            correctionStore: dependencies.correctionStore,
             batchWakeClock: dependencies.batchWakeClock, auditRoll: dependencies.auditRoll,
             ignoresFilteredSMS: { filteredSMSSettings.ignoresFilteredSMS }
         )
@@ -290,8 +271,10 @@ public final class AppModel: ObservableObject {
             preference: dependencies.focusListPreference
         )
         self.isFocusListEnabled = dependencies.focusListPreference.isEnabled
-        self.checkOffCoordinator = CheckOffCoordinator(taskSource: dependencies.taskSource, signalStore: dependencies.signalStore)
-        self.undoBar = UndoBar(clock: dependencies.undoClock, window: dependencies.undoWindow)
+        self.verbs = SignalVerbs(
+            board: board, taskSource: dependencies.taskSource, signalStore: dependencies.signalStore,
+            undoClock: dependencies.undoClock, undoWindow: dependencies.undoWindow, now: dependencies.now
+        )
         self.settingsOpener = dependencies.settingsOpener
         self.refreshClock = dependencies.refreshClock
         self.eventKitChanges = dependencies.eventKitChanges
@@ -302,17 +285,21 @@ public final class AppModel: ObservableObject {
         self.isZenFocusModeEnabled = dependencies.zenFocusModePreference.isEnabled
         self.captureHotkeyPreference = dependencies.captureHotkeyPreference
         self.captureHotkeyPreset = dependencies.captureHotkeyPreference.selected
-        self.extractionSettings = dependencies.extractionSettings
         self.reExtractionSettings = dependencies.reExtractionSettings
         self.historyStore = dependencies.historyStore
         self.signalStore = dependencies.signalStore
-        self.corrections = Corrections(store: dependencies.correctionStore)
+        let corrections = Corrections(store: dependencies.correctionStore)
+        self.corrections = corrections
         self.screeningSettings = dependencies.screeningSettings
-        self.apiKeyStore = dependencies.apiKeyStore
-        self.makeScreener = dependencies.makeScreener
-        self.ruleStore = dependencies.ruleStore
+        self.extraction = ExtractionHost(
+            intake: intake, loader: dependencies.loadModel, extractionSettings: dependencies.extractionSettings,
+            bundleIdentifier: bundleIdentifier, ruleStore: dependencies.ruleStore, corrections: corrections,
+            screeningSettings: dependencies.screeningSettings, apiKeyStore: dependencies.apiKeyStore,
+            makeScreener: dependencies.makeScreener
+        )
         self.now = dependencies.now
         self.rankedAt = dependencies.now()
+        self.presentation = .loading(at: dependencies.now())
         self.snoozeWakeClock = dependencies.snoozeWakeClock
 
         // Wired last, once every stored property above has a value:
@@ -329,177 +316,45 @@ public final class AppModel: ObservableObject {
         intake.onBatchDue = { [weak self] in
             Task { await self?.handleRefresh(.batchDue) }
         }
-        self.checkOffCoordinator.onChange = { [weak self] in
-            self?.republish()
-        }
-        self.undoBar.onChange = { [weak self] in
+        self.verbs.onChange = { [weak self] in
             guard let self else { return }
-            self.undoOffer = self.undoBar.current
+            self.undoOffer = self.verbs.currentOffer
             self.republish()
         }
+        self.verbs.notForMe = SignalVerbs.NotForMe(
+            mark: { [weak self] in self?.historyActions.notForMe($0) ?? false },
+            undo: { [weak self] in self?.historyActions.undoNotForMe(of: $0) }
+        )
         self.focusList.onChange = { [weak self] in
             self?.republish()
         }
-        self.checkOffCoordinator.onCommitted = { [weak self] in
-            await self?.reload()
-        }
-    }
-
-    /// Loading the model (reading a ~2.5GB file, allocating KV cache
-    /// buffers) is too slow for the main actor. A missing or unloadable
-    /// model degrades to `extractionUnavailable`, the same "surface it,
-    /// never block" treatment ticket 10 gives a missing Gate — Messages
-    /// reading and Reminders both keep working either way.
-    ///
-    /// An extractor supplied at init is taken as final and nothing is
-    /// loaded: otherwise `start()` reads the real 2.5GB model off this
-    /// machine's disk, which a test must never do.
-    private func loadExtractor() async {
-        // Whichever extractor ends up loaded, it starts with the current
-        // Rules (ADR 0038), and History's model-bound actions follow it.
-        defer {
-            applyRules()
-            historyActions.changed()
-        }
-        guard intake.extractor == nil else { return }
-        let modelPath = extractionSettings.effectiveModelPath(bundleIdentifier: bundleIdentifier)
-        let promptOverride = extractionSettings.effectivePromptOverride
-        let loaded: LlamaCppIntentExtractor? = await Task.detached {
-            do {
-                return try LlamaCppIntentExtractor(modelPath: modelPath, promptOverride: promptOverride)
-            } catch {
-                FileHandle.standardError.write(Data("DailyOS: failed to load the local extraction model: \(error)\n".utf8))
-                return nil
+        self.extraction.onChange = { [weak self] in
+            guard let self else { return }
+            if self.extraction.isUnavailable != self.extractionUnavailable {
+                self.extractionUnavailable = self.extraction.isUnavailable
             }
-        }.value
-
-        if let loaded {
-            intake.extractor = loaded
-            extractionUnavailable = false
-        } else {
-            extractionUnavailable = true
+            self.historyActions.changed()
+        }
+        self.extraction.isPassRunning = { [weak self] in
+            guard let self else { return false }
+            return self.runningMessagesPass != nil || self.isReExtracting
         }
     }
 
-    /// Hands the stored Rules to the loaded extractor. A no-op until a
-    /// model is loaded; `loadExtractor` calls this once one is.
-    public func applyRules() {
-        intake.extractor?.setRules(ruleStore.rules().map(\.text))
-    }
-
-    /// Whether "Propose rules" can run: a model that can generate free
-    /// text, no intake pass holding it, and at least five "Not for me"
-    /// Corrections since the last proposal. False-negative Corrections
-    /// never count: they are about Screening, not the model (ADR 0038).
-    public func ruleProposalStatus() -> RuleProposalStatus {
-        guard intake.extractor is FreeTextGenerating else { return .noModel }
-        guard runningMessagesPass == nil, !isReExtracting else { return .passRunning }
-        let count = newFalsePositives().count
-        return count >= minimumCorrectionsForProposal ? .ready(newCorrections: count) : .needsMoreCorrections(have: count)
-    }
-
-    /// Asks the local model for up to three general Rules from the new
-    /// "Not for me" Corrections, newest first and as many as fit, then
-    /// moves the watermark so the count starts again. Nothing is approved
-    /// here; the caller shows the result for review.
-    public func proposeRules() async -> [String] {
-        guard case .ready = ruleProposalStatus(), let generator = intake.extractor as? FreeTextGenerating else { return [] }
-        let tokenBudget = (intake.extractor?.maxPromptTokens ?? 0) - ruleProposalMaxTokens
-        var chosen: [Correction] = []
-        for correction in newFalsePositives() {
-            let candidate = chosen + [correction]
-            guard (intake.extractor?.estimatedTokenCount(for: ruleProposalUserPrompt(corrections: candidate)) ?? .max) <= tokenBudget
-            else { break }
-            chosen = candidate
-        }
-        guard !chosen.isEmpty else { return [] }
-        let startedAt = Date()
-        let raw = (try? await generator.generateText(
-            system: ruleProposalSystemPrompt, user: ruleProposalUserPrompt(corrections: chosen),
-            maxTokens: ruleProposalMaxTokens, priority: .userInitiated
-        )) ?? ""
-        let proposed = parseProposedRules(raw)
-        // Only a proposal that produced something uses the Corrections up.
-        // A failed or empty generation leaves the count where it was, so the
-        // user can simply try again.
-        if !proposed.isEmpty {
-            ruleStore.proposalWatermark = startedAt
-        }
-        return proposed
-    }
-
-    private func newFalsePositives() -> [Correction] {
-        corrections.falsePositives(since: ruleStore.proposalWatermark)
-    }
-
-    /// Reads Screening settings and the stored key and hands intake the
-    /// result. No key, or Screening off, leaves intake local-only.
-    public func applyScreeningSettings() {
-        let key = apiKeyStore.read()
-        let mode = effectiveScreeningMode(settings: screeningSettings, apiKey: key)
-        guard mode != .off, let key else {
-            intake.setScreening(nil, mode: .off)
-            return
-        }
-        if screeningBreaker?.key != key {
-            screeningBreaker = (key, ScreeningBreaker(screener: makeScreener(key)))
-        }
-        intake.setScreening(screeningBreaker?.breaker, mode: mode)
-    }
-
-    public func applyScreeningAccessChange() {
-        screeningBreaker = nil
-        applyScreeningSettings()
-        // The toggle decides what History shows about Screening, and which
-        // of "This was work" and "Add task" a Screened Batch offers.
-        historyActions.changed()
-    }
-
+    /// The extraction Notice's Retry.
     public func retryLoadingExtractor() async {
-        extractionUnavailable = false
-        await loadExtractor()
+        await extraction.retry()
     }
 
-    /// Extraction settings (ticket 04): the "explicit re-load action" a
-    /// changed prompt or model path takes effect on, without waiting for
-    /// a full app relaunch. Unlike `retryLoadingExtractor` — which only
-    /// loads when there currently is none — this unconditionally drops
-    /// whatever's loaded first, since the common case here is a working
-    /// extractor whose settings just changed, not a missing one.
-    public func applyExtractionSettingsChange() async {
-        intake.extractor = nil
-        // History's model-bound actions show disabled while the new one loads.
-        historyActions.changed()
-        extractionUnavailable = false
-        await loadExtractor()
-    }
+    /// Whether the chosen model's file is on disk, loaded or not.
+    public var hasModelFile: Bool { extraction.hasModelFile }
 
-    /// The active model's file was deleted. Releasing the extractor frees
-    /// the model's memory once no pass holds it, and with no extractor
-    /// intake skips extraction and leaves Batches unprocessed for the next
-    /// model. Nothing is reloaded: the path now points at nothing.
-    public func unloadExtractor() {
-        intake.extractor = nil
-        historyActions.changed()
-        extractionUnavailable = true
-    }
+    /// The loaded model's name, `nil` with none loaded.
+    public var activeModelDisplayName: String? { extraction.displayName }
 
-    /// Whether the model path points at a file. False once the active
-    /// model is deleted, which the footer shows as "No model selected".
-    public var hasModelFile: Bool {
-        FileManager.default.fileExists(atPath: extractionSettings.effectiveModelPath(bundleIdentifier: bundleIdentifier))
-    }
-
-    /// Settings' footer (ADR 0027): `nil` while no model is loaded, the same
-    /// moment `extractionUnavailable` is `true` — there is nothing to name.
-    public var activeModelDisplayName: String? {
-        intake.extractor?.modelDisplayName
-    }
-
-    /// "Not for me"'s effect on the Signal Board: the open Signals the
-    /// Batch produced are dismissed.
-    func dismissMessages(sourceRef: String) {
-        board.dismiss(sourceRef: sourceRef)
+    /// History wrote to the Signal Board (board-messages-share): the
+    /// window shows it.
+    func boardChanged() {
         republish()
     }
 
@@ -513,28 +368,6 @@ public final class AppModel: ObservableObject {
     /// "This was work"'s pass: the one Batch, straight to the model.
     func extractNow(sourceRef: String) async {
         applyMessages(await intake.extractNow(sourceRef: sourceRef))
-    }
-
-    /// Stores a Signal against its already-Processed Batch, as
-    /// re-extraction does, and puts it on the Board.
-    func addMessageSignal(_ signal: Signal) {
-        if intake.addSignal(signal) {
-            board.seed(messages: intake.storedSignals())
-        }
-        republish()
-    }
-
-    /// Undo of "Not for me" (inbox-undo): puts `signalIds` back to open.
-    func reopenMessageSignals(_ signalIds: [String]) {
-        for id in signalIds { board.reopen(signalId: id) }
-        reloadMessageSignals()
-    }
-
-    /// Re-reads the stored Messages Signals onto the Board, after History
-    /// changed them in the store directly.
-    func reloadMessageSignals() {
-        board.seed(messages: intake.storedSignals())
-        republish()
     }
 
     private func applyMessages(_ result: MessagesIntake.Result) {
@@ -575,7 +408,7 @@ public final class AppModel: ObservableObject {
         // source of truth once it does; see `MessagesIntake.identityMismatch`.
         messagesIdentityMismatch = intake.identityMismatch()
         setUpRefreshCoordinator()
-        applyScreeningSettings()
+        extraction.applyScreeningSettings()
         _ = try? await taskSource.requestAccess()
         _ = try? await contactsResolver.requestAccess()
         await reload()
@@ -588,17 +421,17 @@ public final class AppModel: ObservableObject {
         // to clear `isLoading` meant a full store rendered as "Loading…"
         // for the entire pass. A first run genuinely has nothing to show,
         // so it keeps waiting: `backfillProgress` takes over the screen
-        // moments later (see `screenMode`), and clearing early there would
+        // moments later (see `presentation.screenMode`), and clearing early there would
         // flash "Nothing open. Nice." at someone whose backfill is about to
         // start.
-        board.seed(messages: intake.storedSignals())
+        board.loadStoredMessages()
         republish()
         onStoredListReady?()
         if signalStore.isBackfillComplete() {
             isLoading = false
         }
 
-        await loadExtractor()
+        await extraction.load()
         await reloadMessages()
         isLoading = false
     }
@@ -758,12 +591,12 @@ public final class AppModel: ObservableObject {
         rankedList = board.rankedList(now: rankedAt, hiding: hidingIDs)
         checkedOff = board.checkedOff(now: rankedAt, hiding: hidingIDs)
         checkedOffCount = checkedOff.count
-        updateScreen()
+        updatePresentation()
         updateNotForMeOffers()
-        if let focused = focusedSuggestionId, !rankedList.suggested.contains(where: { $0.id == focused }) {
+        if let focused = focusedSuggestionId, !presentation.isSuggested(focused) {
             focusedSuggestionId = nil
         }
-        if let previewed = previewedSuggestionId, !rankedList.suggested.contains(where: { $0.id == previewed }) {
+        if let previewed = previewedSuggestionId, !presentation.isSuggested(previewed) {
             previewedSuggestionId = nil
         }
         scheduleSnoozeWake()
@@ -818,36 +651,31 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    /// Works out `screenMode` and `sections` from the list and the flags
-    /// they depend on. Called by `republish()` and by each flag's `didSet`.
-    private func updateScreen() {
-        screenMode = decideScreenMode(
-            rankedList: rankedList, isLoading: isLoading, backfillProgress: backfillProgress,
-            isZen: isZenFocusModeEnabled, messagesNeedFullDiskAccess: messagesNeedFullDiskAccess,
-            remindersUnavailable: remindersUnavailable, extractionUnavailable: extractionUnavailable
-        )
-        sections = decideSections(
-            from: rankedList, isZen: isZenFocusModeEnabled, messagesNeedFullDiskAccess: messagesNeedFullDiskAccess,
-            remindersUnavailable: remindersUnavailable, extractionUnavailable: extractionUnavailable
+    /// Builds `presentation` from the list and the flags it reads. Called
+    /// by `republish()` and by each flag's `didSet`.
+    private func updatePresentation() {
+        presentation = ListPresentation(
+            rankedList: rankedList, rankedAt: rankedAt,
+            flags: ListPresentation.Flags(
+                isLoading: isLoading, backfillProgress: backfillProgress, isZen: isZenFocusModeEnabled,
+                messagesNeedFullDiskAccess: messagesNeedFullDiskAccess, remindersUnavailable: remindersUnavailable,
+                extractionUnavailable: extractionUnavailable
+            )
         )
     }
 
-    /// Held back on the Undo bar, and written by `checkOffCoordinator`
-    /// once the offer ends (ADR 0022). Writing it also ends any snooze, so
+    /// Held back on the Undo bar, and written once the offer ends (ADR
+    /// 0022). Writing it also ends any snooze, so
     /// a recurring reminder's next occurrence, which keeps the same id,
     /// doesn't start out hidden (ADR 0045).
     public func checkOff(_ signal: Signal) {
-        undoBar.offer(.checkedOff, label: signal.label, .heldBack(hiding: signal.id) { [weak self] in
-            self?.board.snoozes.end(signalId: signal.id)
-            self?.checkOffCoordinator.commit(signal)
-        })
+        verbs.checkOff(signal)
     }
 
     /// Unchecking a Checked Off row: reopens the reminder, which goes back
     /// to Focus or Later. No Undo bar, and ⌘Z doesn't reach it.
     public func uncheck(_ reminder: CheckedOffReminder) async {
-        await board.uncheck(reminder)
-        republish()
+        await verbs.uncheck(reminder)
     }
 
     /// The count's click: opens the Checked Off sheet when there is
@@ -868,15 +696,13 @@ public final class AppModel: ObservableObject {
     /// bar is written before this returns, so it isn't lost with the
     /// process (ADR 0043).
     public func prepareToQuit() {
-        // The coordinator first, so the held-back offer's commit writes inline.
-        checkOffCoordinator.prepareToQuit()
-        undoBar.flush()
+        verbs.prepareToQuit()
     }
 
     /// The Undo bar's button, and ⌘Z: reverses whatever the bar offers.
     /// Does nothing when the bar is hidden or only reports.
     public func undo() async {
-        await undoBar.undo()
+        if let broughtBack = await verbs.undo() { focusSuggestion(broughtBack) }
     }
 
     /// Messages Signals only: Dismiss means "Extraction produced a false
@@ -885,27 +711,14 @@ public final class AppModel: ObservableObject {
     /// Written at once, unlike check-off, and reversed if the Undo bar's
     /// Undo is pressed (ADR 0043).
     public func dismiss(_ signal: Signal) {
-        guard signal.source == .messages else { return }
-        board.dismiss(signal)
-        republish()
-        undoBar.offer(.dismissed, label: signal.label, .reversible { [weak self] in
-            guard let self else { return }
-            self.board.reopen(signalId: signal.id)
-            self.reloadMessageSignals()
-            self.focusSuggestion(signal.id)
-        })
+        verbs.dismiss(signal)
     }
 
     /// The Inbox's thumbs-down: History's "Not for me" on the Suggestion's
     /// Batch, then the Undo bar, whose Undo reverses it the way History's
     /// Undo does (ADR 0043).
     public func notForMe(_ suggestion: Signal) {
-        guard historyActions.notForMe(suggestion) else { return }
-        undoBar.offer(.notForMe, label: suggestion.label, .reversible { [weak self] in
-            guard let self else { return }
-            self.historyActions.undoNotForMe(of: suggestion)
-            self.focusSuggestion(suggestion.id)
-        })
+        verbs.notForMe(suggestion)
     }
 
     /// Keyboard focus on `id`, if it's in the Inbox: after Undo brings a
@@ -920,14 +733,12 @@ public final class AppModel: ObservableObject {
     /// about ranking needs to change. No demote counterpart for a row its
     /// due date holds in Focus (ADR 0009's noted asymmetry, ADR 0042).
     public func promote(_ signal: Signal) async {
-        await board.promote(signal)
-        republish()
+        await verbs.promote(signal)
     }
 
     /// One-click demotion: the reverse of `promote`.
     public func demote(_ signal: Signal) async {
-        await board.demote(signal)
-        republish()
+        await verbs.demote(signal)
     }
 
     /// Snoozes `signal` off the ranked list until `until`, applying
@@ -935,33 +746,20 @@ public final class AppModel: ObservableObject {
     /// store write plus a republish — `rankedList` reads `snoozedUntil`
     /// fresh on every call, so there's nothing to patch. No Undo bar.
     public func snooze(_ signal: Signal, until: Date) {
-        board.snoozes.snooze(signal, until: until)
-        republish()
+        verbs.snooze(signal, until: until)
     }
 
     /// Unsnooze on a Snoozed row (ADR 0045): back to Focus or Later at
     /// once. No Undo bar; the row reappearing is the confirmation.
     public func unsnooze(_ signal: Signal) {
-        board.snoozes.end(signalId: signal.id)
-        republish()
+        verbs.unsnooze(signal)
     }
 
     /// Tomorrow or Next Week from a row's tray or menu (ADR 0045): ends
     /// at 8:00 AM, judged by the injected clock. Written at once; Undo
     /// puts back whatever snooze the row had before, or none.
     public func snooze(_ signal: Signal, _ choice: SnoozeChoice) {
-        let previous = board.snoozes.until(signalId: signal.id)
-        let until = snoozeEnd(choice, now: now())
-        snooze(signal, until: until)
-        undoBar.offer(.snoozed(until: until), label: signal.label, .reversible { [weak self] in
-            guard let self else { return }
-            if let previous {
-                self.board.snoozes.snooze(signal, until: previous)
-            } else {
-                self.board.snoozes.end(signalId: signal.id)
-            }
-            self.republish()
-        })
+        verbs.snooze(signal, choice)
     }
 
     /// Manual Focus ordering (ADR 0011, supersedes ADR 0009): dragging
@@ -971,16 +769,12 @@ public final class AppModel: ObservableObject {
     /// actually looking at, not a fresh recompute that might disagree
     /// with it.
     private func reorderFocus(draggedId: String, droppedOnId: String) {
-        board.reorderFocus(draggedId: draggedId, droppedOnId: droppedOnId, currentFocusIds: rankedList.focus.map(\.id))
-        republish()
+        verbs.reorderFocus(draggedId: draggedId, droppedOnId: droppedOnId, currentFocusIds: rankedList.focus.map(\.id))
     }
 
     /// Where a dragged row can land: on another row, or on a Tier's header
     /// or the empty Focus drop zone, which both mean the Tier itself.
-    public enum DropTarget: Equatable, Sendable {
-        case row(id: String)
-        case tier(Tier)
-    }
+    public typealias DropTarget = ListPresentation.DropTarget
 
     /// A row dragged onto `target`. Dropped in Focus on a row it takes that
     /// row's place (ADR 0011), after moving into Focus if it came from
@@ -989,37 +783,17 @@ public final class AppModel: ObservableObject {
     /// nothing. Judged against `rankedAt`, the moment the list on screen
     /// was ranked against.
     public func drop(_ draggedId: String, onto target: DropTarget) async {
-        guard let (dragged, source) = row(draggedId) else { return }
-        let targetId: String?
-        let targetTier: Tier
-        switch target {
-        case .row(let id):
-            guard id != draggedId, let (_, tier) = row(id) else { return }
-            (targetId, targetTier) = (id, tier)
-        case .tier(let tier):
-            (targetId, targetTier) = (nil, tier)
-        }
-        switch tierDrop(of: dragged, from: source, onto: targetTier, now: rankedAt) {
-        case .reorder:
-            if let targetId { reorderFocus(draggedId: draggedId, droppedOnId: targetId) }
-        case .promote:
+        switch presentation.drop(draggedId, onto: target) {
+        case .reorder(let draggedId, let ontoId):
+            reorderFocus(draggedId: draggedId, droppedOnId: ontoId)
+        case .promote(let dragged, let ontoId):
             await promote(dragged)
-            if let targetId { reorderFocus(draggedId: draggedId, droppedOnId: targetId) }
-        case .demote:
+            if let ontoId { reorderFocus(draggedId: dragged.id, droppedOnId: ontoId) }
+        case .demote(let dragged):
             await demote(dragged)
         case nil:
             break
         }
-    }
-
-    /// Which actions `signal`'s row offers (ADR 0023), judged against
-    /// `rankedAt` rather than a fresh clock read, so the row agrees with
-    /// the Tier it's drawn in.
-    public func affordances(for signal: Signal) -> SignalAffordances {
-        if rankedList.snoozed.contains(where: { $0.id == signal.id }) {
-            return snoozedAffordances(for: signal)
-        }
-        return DailyOSCore.affordances(for: signal, isLater: row(signal.id)?.tier == .later, now: rankedAt)
     }
 
     /// Whether `section` is collapsed.
@@ -1040,35 +814,13 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    /// Whether `signal`'s due date draws as overdue, judged against
-    /// `rankedAt` like its Tier.
-    public func isOverdue(_ signal: Signal) -> Bool {
-        signal.dueAt.map { DailyOSCore.isOverdue($0, at: rankedAt) } ?? false
-    }
-
-    /// The Focus or Later row with `id` in the list on screen, and its Tier.
-    private func row(_ id: String) -> (signal: Signal, tier: Tier)? {
-        if let signal = rankedList.focus.first(where: { $0.id == id }) { return (signal, .focus) }
-        if let signal = rankedList.later.first(where: { $0.id == id }) { return (signal, .later) }
-        return nil
-    }
-
     /// Suggested Tasks Inbox (Focus Mode v2): approving mints a real
     /// reminder and marks the originating Messages Signal `approved`
     /// (CONTEXT.md: Approve).
     /// Written at once, so the task shows where it landed, and reversed
     /// if the Undo bar's Undo is pressed (ADR 0043).
     public func approve(_ signal: Signal) async {
-        let reminderId = await board.approve(signal)
-        republish()
-        guard let reminderId else { return }
-        let tier: Tier = rankedList.focus.contains { $0.id == reminderId } ? .focus : .later
-        undoBar.offer(.approved(tier), label: signal.label, .reversible { [weak self] in
-            guard let self else { return }
-            await self.board.unapprove(signalId: signal.id, reminderId: reminderId)
-            self.reloadMessageSignals()
-            self.focusSuggestion(signal.id)
-        })
+        await verbs.approve(signal)
     }
 
     /// Tomorrow or Next Week on a Suggestion (ADR 0045): Approves it and
@@ -1076,16 +828,7 @@ public final class AppModel: ObservableObject {
     /// shows in Focus or Later. One Undo reverses both. Records
     /// nothing for extraction, like a plain Approve.
     public func approve(_ signal: Signal, snoozing choice: SnoozeChoice) async {
-        let until = snoozeEnd(choice, now: now())
-        let reminderId = await board.approve(signal, snoozedUntil: until)
-        republish()
-        guard let reminderId else { return }
-        undoBar.offer(.approvedAndSnoozed(until: until), label: signal.label, .reversible { [weak self] in
-            guard let self else { return }
-            await self.board.unapprove(signalId: signal.id, reminderId: reminderId)
-            self.reloadMessageSignals()
-            self.focusSuggestion(signal.id)
-        })
+        await verbs.approve(signal, snoozing: choice)
     }
 
     /// A key the Suggested Tasks Inbox answers to (batched-extraction
@@ -1175,17 +918,7 @@ public final class AppModel: ObservableObject {
     /// the same source of truth an external edit would produce. Quick
     /// Capture's path: no Priority, and no report of where it landed.
     public func createTask(title: String, dueAt: Date? = nil) async {
-        _ = await board.createTask(title: title, priority: .none, dueAt: dueAt)
-        republish()
-    }
-
-    /// Whether Focus is drawn, so the `+` field sits inside it and what it
-    /// adds keeps a Priority.
-    public var showsFocus: Bool {
-        switch screenMode {
-        case .list, .zen: sections.contains { if case .tier(.focus, _) = $0 { true } else { false } }
-        default: false
-        }
+        await verbs.createTask(title: title, dueAt: dueAt)
     }
 
     /// The `+` field. Inside a drawn Focus the reminder gets a Priority so
@@ -1197,149 +930,24 @@ public final class AppModel: ObservableObject {
     /// collapsed, is reported so it doesn't seem to vanish.
     @discardableResult
     public func addReminder(title: String, dueAt: Date? = nil) async -> Tier? {
-        let priority: Priority = dueAt == nil && showsFocus ? .high : .none
-        guard let id = await board.createTask(title: title, priority: priority, dueAt: dueAt) else {
-            republish()
-            return nil
-        }
-        republish()
-        if let added = rankedList.later.first(where: { $0.id == id }) {
-            // Later opens, so the new row shows where it went.
-            collapsedSections.remove(.later)
-            reportAddedToLater(added.label)
-            return .later
-        }
-        return rankedList.focus.contains { $0.id == id } ? .focus : nil
-    }
-
-    private func reportAddedToLater(_ label: String) {
-        undoBar.offer(.addedToLater, label: label, .report)
+        let priority: Priority = dueAt == nil && presentation.showsFocus ? .high : .none
+        let tier = await verbs.addReminder(title: title, priority: priority, dueAt: dueAt)
+        // Later opens, so the new row shows where it went.
+        if tier == .later { collapsedSections.remove(.later) }
+        return tier
     }
 
     /// Reminders Signals only: title is currently the only field DailyOS
     /// lets the user edit from inside the app.
     public func renameTask(_ signal: Signal, to newTitle: String, dueAt: Date? = nil) async {
-        await board.renameTask(signal, to: newTitle, dueAt: dueAt)
-        republish()
+        await verbs.renameTask(signal, to: newTitle, dueAt: dueAt)
     }
 
-    /// Deletes the reminder outright — distinct from check off, which
-    /// leaves it in place, completed. `deletingSignalIDs` hides it
-    /// optimistically for the same reason check off's own mid-write
-    /// tracking does: the write hasn't landed yet, so a refresh
-    /// mid-delete would otherwise still report it open.
+    /// Deletes the reminder outright, distinct from check off, which
+    /// leaves it in place, completed. Hidden until the write lands.
     public func deleteTask(_ signal: Signal) async {
-        deletingSignalIDs.insert(signal.id)
-        republish()
-        await board.deleteTask(signal)
-        deletingSignalIDs.remove(signal.id)
-        republish()
+        await verbs.deleteTask(signal)
     }
-}
-
-/// What dropping a dragged row does, given the Tier it came from and the
-/// Tier it lands in.
-private enum TierDrop {
-    /// Moves it within Focus (ADR 0011).
-    case reorder
-    /// Moves it from Later into Focus by giving it a Priority (ADR 0009).
-    case promote
-    /// Moves it from Focus into Later by clearing its Priority.
-    case demote
-}
-
-/// `nil` where the drop means nothing: within Later, which has no manual
-/// order, or from Focus into Later for a row its due date keeps in Focus,
-/// the same rows that offer no Move to Later.
-private func tierDrop(of signal: Signal, from source: Tier, onto target: Tier, now: Date) -> TierDrop? {
-    switch (source, target) {
-    case (.focus, .focus): .reorder
-    case (.later, .focus): .promote
-    case (.focus, .later): affordances(for: signal, isLater: false, now: now).contains(.demote) ? .demote : nil
-    case (.later, .later): nil
-    }
-}
-
-/// The precedence among the five screens: backfill, then loading, then
-/// empty, then Zen, then the list.
-///
-/// "Nothing open" (`.empty`) requires every Source to be reachable too,
-/// not just every list empty: an unreachable Source still has its own
-/// Notice to show, so `.list` — not `.empty` — is what renders it.
-private func decideScreenMode(
-    rankedList: RankedList,
-    isLoading: Bool,
-    backfillProgress: (completed: Int, total: Int)?,
-    isZen: Bool,
-    messagesNeedFullDiskAccess: Bool,
-    remindersUnavailable: Bool,
-    extractionUnavailable: Bool
-) -> ScreenMode {
-    if let progress = backfillProgress {
-        return .backfill(completed: progress.completed, total: progress.total)
-    }
-    if isLoading {
-        return .loading
-    }
-    let isEverythingEmpty = rankedList.focus.isEmpty && rankedList.later.isEmpty && rankedList.suggested.isEmpty
-        && rankedList.snoozed.isEmpty
-        && !messagesNeedFullDiskAccess && !remindersUnavailable && !extractionUnavailable
-    if isEverythingEmpty {
-        return .empty
-    }
-    if isZen {
-        return .zen
-    }
-    return .list
-}
-
-/// Which Sections exist right now, in order, holding what. A Suggested
-/// Tasks Inbox with nothing in it, or a Tier with nothing in it, produces
-/// no Section.
-///
-/// `isZen` hides Later, the Snoozed Section and the Suggested Tasks Inbox outright — Zen Focus
-/// Mode narrows the window down to Focus alone (CONTEXT.md: Zen Focus
-/// Mode) — and never changes which Signals are Open or how they rank.
-///
-/// A Notice deliberately ignores `isZen` and always sorts after every
-/// Signal-bearing Section: Zen hides what competes for attention, and a
-/// Source the app can't read at all isn't competing, it's broken. Hiding
-/// it there would leave Zen silently showing an incomplete picture, or —
-/// with Focus empty — an entirely blank window (CONTEXT.md: Zen Focus
-/// Mode).
-private func decideSections(
-    from rankedList: RankedList,
-    isZen: Bool,
-    messagesNeedFullDiskAccess: Bool,
-    remindersUnavailable: Bool,
-    extractionUnavailable: Bool
-) -> [DailyOSCore.Section] {
-    var result: [DailyOSCore.Section] = []
-    if !isZen && !rankedList.suggested.isEmpty {
-        result.append(.suggested(rankedList.suggested))
-    }
-    // An empty Focus still shows beside a non-empty Later, as the place to
-    // drag a Later row into. Zen shows nothing else, so there it needs rows.
-    let showsEmptyFocus = !isZen && !rankedList.later.isEmpty
-    if !rankedList.focus.isEmpty || showsEmptyFocus {
-        result.append(.tier(.focus, groupForRendering(rankedList.focus)))
-    }
-    if !isZen && !rankedList.later.isEmpty {
-        result.append(.tier(.later, groupForRendering(rankedList.later)))
-    }
-    if !isZen && !rankedList.snoozed.isEmpty {
-        result.append(.snoozed(rankedList.snoozed))
-    }
-    if messagesNeedFullDiskAccess {
-        result.append(.notice(.messagesUnavailable))
-    }
-    if remindersUnavailable {
-        result.append(.notice(.remindersUnavailable))
-    }
-    if extractionUnavailable {
-        result.append(.notice(.extractionUnavailable))
-    }
-    return result
 }
 
 /// A Section that can be collapsed from its header.

@@ -249,6 +249,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
         r.run("a Re-run lands on the same list row") {
             let extractor = FakeIntentExtractor(defaultResponse: "Book it")
             let app = await MainActor.run { makeHistoryApp(extractor: extractor) }
+            await app.model.extraction.load()
             let (viewModel, _) = try await MainActor.run {
                 try makeDashboard([
                     extractionEntry(id: "h1", ref: "m1", at: hoursAgo(2)),
@@ -266,6 +267,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
 
         r.run("This was work is offered only on a Screened Batch with no model result, and records from its Screening row") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, _) = try await MainActor.run {
                 try makeDashboard([screeningEntry(id: "s1", ref: "m1", probability: 0.1, wasScreened: true)], app: app)
             }
@@ -297,6 +299,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
 
         r.run("This was work on a Screened Batch counts it as Corrected") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, batch) = try await MainActor.run { () -> (HistoryViewModel, HistoryBatch) in
                 let (viewModel, _) = try makeDashboard([
                     screeningEntry(id: "s1", ref: "m2", probability: 0.1, wasScreened: true, at: hoursAgo(1)),
@@ -383,6 +386,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
     runner.suite("Toolbar view switcher (ticket 03)") { r in
         r.run("Overview, the default, lists Batches that produced a task plus Borderline and Corrected ones") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, _) = try await MainActor.run { try seeded(app: app, unfiltered: false) }
             try await MainActor.run {
                 try expect(viewModel.segment == .overview)
@@ -423,6 +427,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
 
         r.run("Corrected lists Batches marked Not for me or This was work") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, _) = try await MainActor.run { try seeded(app: app) }
             let (plain, outside) = try await MainActor.run {
                 (try require(viewModel.batches.first { $0.id == "plain" }), try require(viewModel.batches.first { $0.id == "outside" }))
@@ -512,6 +517,7 @@ func registerHistoryDashboardTests(_ runner: TestRunner) {
 
         r.run("a Screened Batch overturned with This was work reads Task and Corrected") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             let (viewModel, store) = try await MainActor.run {
                 try makeDashboard([screeningEntry(ref: "m1", probability: 0.12, wasScreened: true, at: hoursAgo(2))], app: app, cutoff: 0.9)
             }

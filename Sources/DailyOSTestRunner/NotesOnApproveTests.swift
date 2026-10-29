@@ -31,7 +31,7 @@ private func makeHarness(suggestions: [Signal] = [], tasks: [ReminderTask] = [])
             d.dayChanges = FakeDayChangeObserver()
             d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-            d.extractor = FakeIntentExtractor()
+            d.loadModel = { _, _ in FakeIntentExtractor() }
             d.historyStore = makeTestHistoryStore()
             d.correctionStore = FakeCorrectionStore()
             d.apiKeyStore = FakeAPIKeyStore()

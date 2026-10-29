@@ -23,12 +23,12 @@ private func storeOldFormatPrompt(_ prompt: String, in defaults: UserDefaults) {
 
 @MainActor
 private func makeViewModel(
-    suite: String, reloader: FakeExtractionReloader = FakeExtractionReloader()
+    suite: String, reloader: TestExtraction = TestExtraction()
 ) -> SettingsViewModel {
     SettingsViewModel(
         extractionSettings: ExtractionSettings(defaults: defaults(suite)),
         reExtractionSettings: ReExtractionSettings(defaults: defaults(suite)),
-        model: reloader
+        extraction: reloader.host
     )
 }
 
@@ -52,13 +52,13 @@ func registerSettingsViewModelTests(_ runner: TestRunner) {
 
         r.run("saving an edited prompt stores it and reloads extraction once") {
             let suite = isolatedSuite()
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run { makeViewModel(suite: suite, reloader: reloader) }
             await MainActor.run { viewModel.prompt = "Custom prompt." }
             await viewModel.saveAndReload()
             try await MainActor.run {
                 try expect(ExtractionSettings(defaults: defaults(suite)).promptOverride == "Custom prompt.")
-                try expect(reloader.applyCount == 1)
+                try expect(reloader.log.loads == 1)
                 try expect(viewModel.statusMessage == "Saved. Extraction is using the new prompt.")
             }
         }
@@ -91,8 +91,8 @@ func registerSettingsViewModelTests(_ runner: TestRunner) {
         }
 
         r.run("a reload that leaves extraction unavailable says so") {
-            let reloader = await MainActor.run { FakeExtractionReloader() }
-            await MainActor.run { reloader.extractionUnavailable = true }
+            let reloader = await MainActor.run { TestExtraction() }
+            await MainActor.run { reloader.log.fails = true }
             let viewModel = await MainActor.run { makeViewModel(suite: isolatedSuite(), reloader: reloader) }
             await MainActor.run { viewModel.prompt = "Custom prompt." }
             await viewModel.saveAndReload()
@@ -124,35 +124,35 @@ func registerSettingsViewModelTests(_ runner: TestRunner) {
         r.run("cancelling an edit leaves the saved prompt alone and the next edit starts from it") {
             let suite = isolatedSuite()
             ExtractionSettings(defaults: defaults(suite)).promptOverride = "Saved prompt."
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             try await MainActor.run {
                 let viewModel = makeViewModel(suite: suite, reloader: reloader)
                 viewModel.beginEditing()
                 viewModel.prompt = "Half-finished edit"
                 viewModel.cancelEditing()
                 try expect(ExtractionSettings(defaults: defaults(suite)).promptOverride == "Saved prompt.")
-                try expect(reloader.applyCount == 0)
+                try expect(reloader.log.loads == 0)
                 viewModel.beginEditing()
                 try expect(viewModel.prompt == "Saved prompt.")
             }
         }
 
         r.run("saving reports whether extraction came back") {
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run { makeViewModel(suite: isolatedSuite(), reloader: reloader) }
             await MainActor.run { viewModel.prompt = "Custom prompt." }
             let succeeded = await viewModel.saveAndReload()
             try expect(succeeded)
 
-            await MainActor.run { reloader.extractionUnavailable = true }
+            await MainActor.run { reloader.log.fails = true }
             let failed = await viewModel.saveAndReload()
             try expect(!failed)
         }
 
         r.run("a failed reload keeps the saved prompt") {
             let suite = isolatedSuite()
-            let reloader = await MainActor.run { FakeExtractionReloader() }
-            await MainActor.run { reloader.extractionUnavailable = true }
+            let reloader = await MainActor.run { TestExtraction() }
+            await MainActor.run { reloader.log.fails = true }
             let viewModel = await MainActor.run { makeViewModel(suite: suite, reloader: reloader) }
             await MainActor.run { viewModel.prompt = "Custom prompt." }
             await viewModel.saveAndReload()
@@ -162,12 +162,12 @@ func registerSettingsViewModelTests(_ runner: TestRunner) {
         r.run("reset to default clears the saved prompt and reloads once") {
             let suite = isolatedSuite()
             ExtractionSettings(defaults: defaults(suite)).promptOverride = "Custom prompt."
-            let reloader = await MainActor.run { FakeExtractionReloader() }
+            let reloader = await MainActor.run { TestExtraction() }
             let viewModel = await MainActor.run { makeViewModel(suite: suite, reloader: reloader) }
             await viewModel.resetToDefault()
             try await MainActor.run {
                 try expect(ExtractionSettings(defaults: defaults(suite)).promptOverride == nil)
-                try expect(reloader.applyCount == 1)
+                try expect(reloader.log.loads == 1)
                 try expect(viewModel.promptStatus == .builtIn)
                 try expect(viewModel.prompt == LlamaCppIntentExtractor.defaultExtractionPrompt)
             }

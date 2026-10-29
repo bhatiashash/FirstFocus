@@ -72,9 +72,9 @@ func registerViewDecisionsTests(_ runner: TestRunner) {
             await model.start()
             try await MainActor.run {
                 let row = try require(model.rankedList.focus.first)
-                try expect(!model.isOverdue(row))
+                try expect(!model.presentation.isOverdue(row))
                 clock.date = noon.addingTimeInterval(2 * 3600)
-                try expect(!model.isOverdue(row), "nothing re-ranked yet, so the row still agrees with the list")
+                try expect(!model.presentation.isOverdue(row), "nothing re-ranked yet, so the row still agrees with the list")
             }
         }
     }

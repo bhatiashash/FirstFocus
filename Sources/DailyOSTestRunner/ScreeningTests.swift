@@ -205,12 +205,13 @@ func registerScreeningTests(_ runner: TestRunner) {
     }
 
     runner.suite("ScreeningSettingsViewModel") { r in
-        r.run("enabling Screening and saving a key reaches the app, and the key goes to the key store, not preferences") {
+        r.run("enabling Screening and saving a key reaches Intake, and the key goes to the key store, not preferences") {
             let suite = "DailyOSTests-\(UUID().uuidString)"
             let keys = FakeAPIKeyStore()
-            let app = await MainActor.run { FakeScreeningConfiguring() }
+            let settings = ScreeningSettings(defaults: UserDefaults(suiteName: suite)!)
+            let extraction = await MainActor.run { TestExtraction(keyStore: keys, screeningSettings: settings) }
             let viewModel = await MainActor.run {
-                ScreeningSettingsViewModel(settings: ScreeningSettings(defaults: UserDefaults(suiteName: suite)!), keyStore: keys, app: app)
+                ScreeningSettingsViewModel(settings: settings, keyStore: keys, extraction: extraction.host)
             }
             await MainActor.run {
                 viewModel.apiKeyDraft = "tsk-123"
@@ -220,7 +221,8 @@ func registerScreeningTests(_ runner: TestRunner) {
             try expect(keys.key == "tsk-123")
             try expect(!UserDefaults(suiteName: suite)!.dictionaryRepresentation().values.contains { ($0 as? String) == "tsk-123" })
             try await MainActor.run {
-                try expect(app.applyCount >= 2, "both changes should be pushed to the app")
+                try expect(extraction.intake.screeningMode == .shadow, "got \(extraction.intake.screeningMode)")
+                try expect(extraction.intake.screener != nil)
                 try expect(viewModel.hasAPIKey)
                 try expect(viewModel.apiKeyDraft.isEmpty, "the field clears once the key is stored")
             }
@@ -228,22 +230,31 @@ func registerScreeningTests(_ runner: TestRunner) {
 
         r.run("removing the key turns Screening back to local-only") {
             let keys = FakeAPIKeyStore(key: "tsk-123")
-            let app = await MainActor.run { FakeScreeningConfiguring() }
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
             settings.isEnabled = true
-            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: keys, app: app) }
-            await MainActor.run { viewModel.removeAPIKey() }
+            let extraction = await MainActor.run { TestExtraction(keyStore: keys, screeningSettings: settings) }
+            let viewModel = await MainActor.run {
+                ScreeningSettingsViewModel(settings: settings, keyStore: keys, extraction: extraction.host)
+            }
+            try await MainActor.run {
+                extraction.host.applyScreeningSettings()
+                try expect(extraction.intake.screeningMode != .off)
+                viewModel.removeAPIKey()
+            }
             try expect(keys.key == nil)
-            try expect(effectiveScreeningMode(settings: settings, apiKey: keys.read()) == .off)
-            let applyCount = await MainActor.run { app.applyCount }
-            try expect(applyCount == 1)
+            try await MainActor.run {
+                try expect(extraction.intake.screeningMode == .off)
+                try expect(extraction.intake.screener == nil)
+            }
         }
 
         r.run("cancelling key entry throws away what was typed and leaves the stored key alone") {
             let keys = FakeAPIKeyStore(key: "tsk-123")
-            let app = await MainActor.run { FakeScreeningConfiguring() }
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
-            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: keys, app: app) }
+            let extraction = await MainActor.run { TestExtraction(keyStore: keys, screeningSettings: settings) }
+            let viewModel = await MainActor.run {
+                ScreeningSettingsViewModel(settings: settings, keyStore: keys, extraction: extraction.host)
+            }
             await MainActor.run {
                 viewModel.apiKeyDraft = "tsk-typo"
                 viewModel.cancelKeyEntry()
@@ -252,7 +263,7 @@ func registerScreeningTests(_ runner: TestRunner) {
             try await MainActor.run {
                 try expect(viewModel.apiKeyDraft.isEmpty)
                 try expect(viewModel.hasAPIKey)
-                try expect(app.applyCount == 0)
+                try expect(extraction.screenersBuilt == 0, "nothing reached Screening")
             }
         }
     }
@@ -283,7 +294,7 @@ func registerScreeningAppModelTests(_ runner: TestRunner) {
                         d.foregroundObserver = FakeForegroundObserver()
                         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                         d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                        d.extractor = extractor
+                        d.loadModel = { _, _ in extractor }
                         d.historyStore = makeTestHistoryStore()
                         d.correctionStore = FakeCorrectionStore()
                         d.screeningSettings = settings
@@ -298,11 +309,4 @@ func registerScreeningAppModelTests(_ runner: TestRunner) {
             }
         }
     }
-}
-
-@MainActor
-final class FakeScreeningConfiguring: ScreeningConfiguring {
-    private(set) var applyCount = 0
-    func applyScreeningSettings() { applyCount += 1 }
-    func applyScreeningAccessChange() { applyCount += 1 }
 }

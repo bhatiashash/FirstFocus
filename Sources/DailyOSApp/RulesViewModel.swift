@@ -17,13 +17,11 @@ public final class RulesViewModel: ObservableObject {
     @Published public private(set) var isProposing = false
 
     private let store: any RuleBook
-    private let app: any RulesConfiguring
-    private let proposer: (any RuleProposing)?
+    private let extraction: ExtractionHost
 
-    public init(store: any RuleBook, app: any RulesConfiguring, proposer: (any RuleProposing)? = nil) {
+    public init(store: any RuleBook, extraction: ExtractionHost) {
         self.store = store
-        self.app = app
-        self.proposer = proposer
+        self.extraction = extraction
         rules = store.rules()
         refreshProposalStatus()
     }
@@ -45,13 +43,12 @@ public final class RulesViewModel: ObservableObject {
     }
 
     public func refreshProposalStatus() {
-        proposalStatus = proposer?.ruleProposalStatus() ?? .noModel
+        proposalStatus = extraction.ruleProposalStatus()
     }
 
     public func propose() async {
-        guard let proposer else { return }
         isProposing = true
-        let texts = await proposer.proposeRules()
+        let texts = await extraction.proposeRules()
         isProposing = false
         pending = texts.map { PendingRule(id: UUID().uuidString, text: $0) }
         errorMessage = texts.isEmpty ? "The model didn't propose any Rules." : nil
@@ -122,7 +119,7 @@ public final class RulesViewModel: ObservableObject {
     private func changed() {
         rules = store.rules()
         errorMessage = nil
-        app.applyRules()
+        extraction.applyRules()
     }
 }
 

@@ -80,6 +80,7 @@ func registerReviewFilterTests(_ runner: TestRunner) {
             try seed(store)
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
             let app = await MainActor.run { makeHistoryApp(history: store) }
+            await app.model.extraction.load()
             let viewModel = await MainActor.run {
                 let viewModel = app.viewModel(screeningSettings: settings)
                 viewModel.showsUnfilteredLog = true

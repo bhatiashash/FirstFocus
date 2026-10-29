@@ -29,7 +29,7 @@ extension AppDependencies {
             reExtractionSettings: ReExtractionSettings(defaults: defaults),
             undoClock: FakeUndoClock(),
             undoWindow: 5,
-            extractor: FakeIntentExtractor(),
+            loadModel: { _, _ in FakeIntentExtractor() },
             historyStore: makeTestHistoryStore(),
             participantLabelStore: SQLiteParticipantLabelStore(path: testStorePath()),
             correctionStore: FakeCorrectionStore(),

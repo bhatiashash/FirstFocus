@@ -34,10 +34,11 @@ public struct SignalAffordances: OptionSet, Sendable {
 /// unconditionally, regardless of source or Tier, so there's nothing to
 /// decide about them.
 ///
-/// `isLater` is the caller's own Tier classification (`tier(for:now:)`
-/// evaluated once, upstream). `now` is needed only for demote: whether a
-/// due date holds the row in Focus depends on the day (ADR 0042).
-public func affordances(for signal: Signal, isLater: Bool, now: Date) -> SignalAffordances {
+/// Asked only by `ListPresentation`, which knows the row's Tier from the
+/// part of the Ranked List that holds it (list-presentation). `now` is
+/// needed only for demote: whether a due date holds the row in Focus
+/// depends on the day (ADR 0042).
+func tierAffordances(for signal: Signal, isLater: Bool, now: Date) -> SignalAffordances {
     var result: SignalAffordances = []
 
     switch signal.source {
@@ -70,7 +71,7 @@ public func affordances(for signal: Signal, isLater: Bool, now: Date) -> SignalA
         // `tier(for:now:)` returning `.focus` (ADR 0009's noted asymmetry,
         // narrowed by ADR 0042) — offering the button there would
         // silently do nothing rather than what it promises.
-        if signal.priority != .none && !dueDateHoldsInFocus(signal, now: now) {
+        if canMoveToLater(signal, now: now) {
             result.insert(.demote)
         }
     }
@@ -81,9 +82,17 @@ public func affordances(for signal: Signal, isLater: Bool, now: Date) -> SignalA
 /// What a row in the Snoozed Section can do (ADR 0045): Unsnooze, plus
 /// the same source-specific actions as anywhere else. No Tier moves and
 /// no drag, since nothing in the Section is ranked.
-public func snoozedAffordances(for signal: Signal) -> SignalAffordances {
+func snoozedAffordances(for signal: Signal) -> SignalAffordances {
     switch signal.source {
     case .messages: return [.unsnooze, .dismiss]
     case .reminders: return [.unsnooze, .rename, .delete]
     }
+}
+
+/// Whether clearing a Focus row's Priority moves it to Later: only when
+/// the Priority alone holds it in Focus, not a due date within tomorrow
+/// (ADR 0009's asymmetry, narrowed by ADR 0042). Move to Later and a drop
+/// into Later both ask this.
+func canMoveToLater(_ signal: Signal, now: Date) -> Bool {
+    signal.priority != .none && !dueDateHoldsInFocus(signal, now: now)
 }

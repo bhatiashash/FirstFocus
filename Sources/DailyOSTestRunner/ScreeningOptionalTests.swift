@@ -268,7 +268,7 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = FakeIntentExtractor()
+                    d.loadModel = { _, _ in FakeIntentExtractor() }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.screeningSettings = settings
@@ -276,7 +276,7 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                     d.makeScreener = { _ in screener }
                     d.bundlePath = "/nonexistent"
                 })
-                let viewModel = ScreeningSettingsViewModel(settings: settings, keyStore: keys, app: model)
+                let viewModel = ScreeningSettingsViewModel(settings: settings, keyStore: keys, extraction: model.extraction)
                 return Harness(model: model, viewModel: viewModel, source: source, screener: screener)
             }
         }
@@ -345,7 +345,7 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = FakeIntentExtractor()
+                    d.loadModel = { _, _ in FakeIntentExtractor() }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.screeningSettings = settings
@@ -358,9 +358,9 @@ func registerScreeningBreakerTests(_ runner: TestRunner) {
                 })
             }
             await MainActor.run {
-                model.applyScreeningSettings()
+                model.extraction.applyScreeningSettings()
                 keys.key = "tsk-2"
-                model.applyScreeningSettings()
+                model.extraction.applyScreeningSettings()
             }
             try expect(built.keys == ["tsk-1", "tsk-2"], "got \(built.keys)")
         }
@@ -403,8 +403,10 @@ func registerScreeningUnavailableHistoryTests(_ runner: TestRunner) {
 /// the model found nothing, and a Batch whose Screening failed before the
 /// model found a task. Cutoff 0.4, so 0.45 is Borderline.
 @MainActor
-private func jevEraHistory(screeningOn: Bool, unfiltered: Bool = true) throws -> (HistoryViewModel, HistoryApp) {
-    let app = makeHistoryApp()
+private func jevEraHistory(
+    screeningOn: Bool, unfiltered: Bool = true, app: HistoryApp? = nil
+) throws -> (HistoryViewModel, HistoryApp) {
+    let app = app ?? makeHistoryApp()
     let settings = app.screeningSettings
     settings.isEnabled = screeningOn
     settings.cutoff = 0.4
@@ -469,8 +471,10 @@ func registerScreeningToggleHistoryTests(_ runner: TestRunner) {
         }
 
         r.run("toggle on, even with no key: everything Screening shows, as stored") {
+            let loaded = await MainActor.run { makeHistoryApp() }
+            await loaded.model.extraction.load()
             try await MainActor.run {
-                let (viewModel, app) = try jevEraHistory(screeningOn: true)
+                let (viewModel, app) = try jevEraHistory(screeningOn: true, app: loaded)
                 try expect(viewModel.segments.contains(.borderline))
                 try expect(
                     viewModel.weekCounts == "3 Batches · 1 with a task · 1 Screened · 1 Borderline", "got \(viewModel.weekCounts)"
@@ -496,7 +500,7 @@ func registerScreeningToggleHistoryTests(_ runner: TestRunner) {
                 let (viewModel, app) = try jevEraHistory(screeningOn: true)
                 let failed = try batch("failed", in: viewModel)
                 let screened = try batch("screened", in: viewModel)
-                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), app: app.model)
+                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), extraction: app.model.extraction)
                 settings.isEnabled = false
                 try expect(viewModel.badges(for: failed).map(\.text) == ["Task"])
                 settings.isEnabled = true
@@ -518,7 +522,7 @@ func registerScreeningToggleHistoryTests(_ runner: TestRunner) {
             try await MainActor.run {
                 let (viewModel, app) = try jevEraHistory(screeningOn: true)
                 viewModel.segment = .borderline
-                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), app: app.model)
+                let settings = ScreeningSettingsViewModel(settings: app.screeningSettings, keyStore: FakeAPIKeyStore(), extraction: app.model.extraction)
                 settings.isEnabled = false
                 try expect(viewModel.segment == .overview)
             }
@@ -547,7 +551,7 @@ func registerScreeningKeylessSettingsTests(_ runner: TestRunner) {
                 let settings = ScreeningSettings(defaults: throwawayDefaults())
                 settings.isEnabled = true
                 let viewModel = ScreeningSettingsViewModel(
-                    settings: settings, keyStore: FakeAPIKeyStore(), app: FakeScreeningConfiguring()
+                    settings: settings, keyStore: FakeAPIKeyStore(), extraction: TestExtraction().host
                 )
                 try expect(!viewModel.canTuneCutoff)
                 try expect(viewModel.tuneCutoffHint == "Add a key to tune the cutoff.")

@@ -2,7 +2,7 @@ import Foundation
 
 /// What a Focus or Later row shows, and what its drawer holds once
 /// clicked (ADR 0041; CONTEXT.md: Notes). Decided once here, like
-/// `affordances(for:isLater:now:)` (ADR 0023), so the row view only reads
+/// `ListPresentation.affordances(for:)` (ADR 0023), so the row view only reads
 /// the answer.
 public struct RowDrawer: Equatable, Sendable {
     /// The Label as the row shows it: URLs taken out, since they move into

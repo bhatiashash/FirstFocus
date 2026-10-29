@@ -105,7 +105,7 @@ private func makeModel(_ taskSource: FakeTaskSource, _ preference: FocusListPref
         d.dayChanges = FakeDayChangeObserver()
         d.zenFocusModePreference = ZenFocusModePreference(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
         d.focusListPreference = preference
-        d.extractor = FakeIntentExtractor()
+        d.loadModel = { _, _ in FakeIntentExtractor() }
         d.historyStore = makeTestHistoryStore()
         d.correctionStore = FakeCorrectionStore()
         d.apiKeyStore = FakeAPIKeyStore()

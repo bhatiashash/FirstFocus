@@ -47,7 +47,7 @@ private func makeHarness(
             d.zenFocusModePreference = preference
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
             d.undoClock = undoClock
-            d.extractor = FakeIntentExtractor()
+            d.loadModel = { _, _ in FakeIntentExtractor() }
             d.historyStore = makeTestHistoryStore()
             d.correctionStore = FakeCorrectionStore()
             d.apiKeyStore = FakeAPIKeyStore()
@@ -102,7 +102,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
             let h = await makeHarness(checkedOff: [checkedOffReminder(id: "r1", at: now.addingTimeInterval(-60))], now: now)
             await h.model.start()
             let (isEmpty, ids, count) = await MainActor.run {
-                (h.model.screenMode == .empty, h.model.sections.map(\.id), h.model.checkedOffCount)
+                (h.model.presentation.screenMode == .empty, h.model.presentation.sections.map(\.id), h.model.checkedOffCount)
             }
             try expect(isEmpty, "nothing open is the empty screen, whatever was checked off")
             try expect(ids.isEmpty, "got \(ids)")
@@ -116,7 +116,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
                 tasks: [task(id: "focus")], checkedOff: [checkedOffReminder(id: "r1", at: now.addingTimeInterval(-60))], now: now
             )
             await h.model.start()
-            let (isList, shows) = await MainActor.run { (h.model.screenMode == .list, h.model.showsCheckedOffCount) }
+            let (isList, shows) = await MainActor.run { (h.model.presentation.screenMode == .list, h.model.showsCheckedOffCount) }
             try expect(isList && shows)
         }
 
@@ -137,7 +137,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
         r.run("with nothing open in Zen, the window is empty") {
             let h = await makeHarness(checkedOff: [checkedOffReminder(id: "r1", at: now.addingTimeInterval(-60))], zen: true, now: now)
             await h.model.start()
-            let (isEmpty, shows) = await MainActor.run { (h.model.screenMode == .empty, h.model.showsCheckedOffCount) }
+            let (isEmpty, shows) = await MainActor.run { (h.model.presentation.screenMode == .empty, h.model.showsCheckedOffCount) }
             try expect(isEmpty, "Zen draws nothing but Focus, so the window is empty")
             try expect(!shows, "Zen's empty screen has no count under it")
         }
@@ -173,7 +173,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
                 messages: .unavailable, now: now
             )
             await h.model.start()
-            let ids = await MainActor.run { h.model.sections.map(\.id) }
+            let ids = await MainActor.run { h.model.presentation.sections.map(\.id) }
             try expect(ids == ["tier-focus", "tier-later", "notice-messagesUnavailable"], "got \(ids)")
         }
 
@@ -231,38 +231,6 @@ func registerCheckedOffTests(_ runner: TestRunner) {
             let (ids, focus) = try await MainActor.run { (try checkedOffIds(h.model), h.model.rankedList.focus.map(\.id)) }
             try expect(ids == nil, "got \(String(describing: ids))")
             try expect(focus == ["r1"], "got \(focus)")
-        }
-    }
-
-    runner.suite("AppModel: checking off clears the snooze (ADR 0045)") { r in
-        let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 3600)
-
-        r.run("a Snoozed row checked off has no snooze once the check-off is written") {
-            let h = await makeHarness(tasks: [task(id: "r1")], now: now)
-            await h.model.start()
-            try await MainActor.run {
-                h.model.snooze(h.model.rankedList.focus[0], until: now.addingTimeInterval(3600))
-                h.model.checkOff(try require(h.model.rankedList.snoozed.first))
-            }
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] != nil, "not written yet, so the snooze stays")
-            h.undoClock.fire()
-            await settle()
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] == nil)
-        }
-
-        r.run("an undone check-off keeps the snooze") {
-            let h = await makeHarness(tasks: [task(id: "r1")], now: now)
-            await h.model.start()
-            try await MainActor.run {
-                h.model.snooze(h.model.rankedList.focus[0], until: now.addingTimeInterval(3600))
-                h.model.checkOff(try require(h.model.rankedList.snoozed.first))
-            }
-            await h.model.undo()
-            h.undoClock.fire()
-            await settle()
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] == now.addingTimeInterval(3600))
-            let snoozed = await MainActor.run { h.model.rankedList.snoozed.map(\.id) }
-            try expect(snoozed == ["r1"], "got \(snoozed)")
         }
     }
 

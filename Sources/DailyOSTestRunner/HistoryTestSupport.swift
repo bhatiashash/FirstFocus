@@ -93,7 +93,7 @@ func makeHistoryApp(
         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
         d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
         d.undoClock = undoClock
-        d.extractor = extractor
+        d.loadModel = { _, _ in extractor }
         d.historyStore = history
         d.correctionStore = corrections
         d.screeningSettings = screeningSettings

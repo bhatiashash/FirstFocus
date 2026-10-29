@@ -17,7 +17,7 @@ public final class ScreeningSettingsViewModel: ObservableObject {
     @Published public var isEnabled: Bool {
         didSet {
             settings.isEnabled = isEnabled
-            app.applyScreeningAccessChange()
+            extraction.applyScreeningAccessChange()
         }
     }
     /// Live mode (ADR 0036): only offered once a cutoff has been set.
@@ -29,7 +29,7 @@ public final class ScreeningSettingsViewModel: ObservableObject {
                 return
             }
             settings.isLive = isLive
-            app.applyScreeningSettings()
+            extraction.applyScreeningSettings()
         }
     }
     /// The stepper's value. Starts at 0.5 for display, but nothing is
@@ -61,17 +61,17 @@ public final class ScreeningSettingsViewModel: ObservableObject {
 
     private let settings: ScreeningSettings
     private let keyStore: any APIKeyStore
-    private let app: any ScreeningConfiguring
+    private let extraction: ExtractionHost
     private let historyStore: (any HistoryStore)?
     private let correctionLog: (any CorrectionLog)?
 
     public init(
-        settings: ScreeningSettings, keyStore: any APIKeyStore, app: any ScreeningConfiguring,
+        settings: ScreeningSettings, keyStore: any APIKeyStore, extraction: ExtractionHost,
         historyStore: (any HistoryStore)? = nil, correctionLog: (any CorrectionLog)? = nil
     ) {
         self.settings = settings
         self.keyStore = keyStore
-        self.app = app
+        self.extraction = extraction
         self.historyStore = historyStore
         self.correctionLog = correctionLog
         self.isEnabled = settings.isEnabled
@@ -100,7 +100,7 @@ public final class ScreeningSettingsViewModel: ObservableObject {
         cutoff = clamped
         candidateCutoff = clamped
         canGoLive = true
-        app.applyScreeningSettings()
+        extraction.applyScreeningSettings()
     }
 
     public func saveAPIKey() {
@@ -111,7 +111,7 @@ public final class ScreeningSettingsViewModel: ObservableObject {
             apiKeyDraft = ""
             hasAPIKey = true
             errorMessage = nil
-            app.applyScreeningAccessChange()
+            extraction.applyScreeningAccessChange()
         } catch {
             errorMessage = "Couldn't save the key to the Keychain."
         }
@@ -128,7 +128,7 @@ public final class ScreeningSettingsViewModel: ObservableObject {
             try keyStore.delete()
             hasAPIKey = false
             errorMessage = nil
-            app.applyScreeningAccessChange()
+            extraction.applyScreeningAccessChange()
         } catch {
             errorMessage = "Couldn't remove the key from the Keychain."
         }

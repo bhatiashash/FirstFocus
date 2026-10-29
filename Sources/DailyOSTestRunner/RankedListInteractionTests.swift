@@ -71,7 +71,7 @@ private func makeHarness(
             d.zenFocusModePreference = preference
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
             d.undoClock = FakeUndoClock()
-            d.extractor = FakeIntentExtractor()
+            d.loadModel = { _, _ in FakeIntentExtractor() }
             d.historyStore = makeTestHistoryStore()
             d.correctionStore = FakeCorrectionStore()
             d.apiKeyStore = FakeAPIKeyStore()
@@ -123,7 +123,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             h.clock.date = afterMidnight
             try await MainActor.run {
                 let row = try require(h.model.rankedList.focus.first { $0.id == "r1" })
-                try expect(h.model.affordances(for: row).contains(.demote), "the list was ranked before midnight")
+                try expect(h.model.presentation.affordances(for: row).contains(.demote), "the list was ranked before midnight")
             }
         }
 
@@ -142,7 +142,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             await h.model.reload()
             try await MainActor.run {
                 let row = try require(h.model.rankedList.focus.first { $0.id == "r1" })
-                try expect(!h.model.affordances(for: row).contains(.demote), "its date now holds it in Focus")
+                try expect(!h.model.presentation.affordances(for: row).contains(.demote), "its date now holds it in Focus")
             }
         }
     }
@@ -172,7 +172,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             let h = await makeHarness(tasks: [task(id: "l1")])
             await h.model.start()
             try await MainActor.run {
-                try expect(h.model.sections.map(\.id) == ["tier-focus", "tier-later"], "the empty Focus is drawn as a target")
+                try expect(h.model.presentation.sections.map(\.id) == ["tier-focus", "tier-later"], "the empty Focus is drawn as a target")
             }
             await h.model.drop("l1", onto: .tier(.focus))
             let focus = await MainActor.run { h.model.rankedList.focus.map(\.id) }
@@ -237,7 +237,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
         r.run("with Focus hidden it adds to Later and reports Later") {
             let h = await makeHarness()
             await h.model.start()
-            try await MainActor.run { try expect(!h.model.showsFocus) }
+            try await MainActor.run { try expect(!h.model.presentation.showsFocus) }
             let tier = await h.model.addReminder(title: "Water the plants")
             try expect(tier == .later)
             try expect(h.taskSource.tasks.first { $0.title == "Water the plants" }?.priority == Priority.none)
@@ -319,7 +319,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             try await MainActor.run {
                 h.model.snooze(h.model.rankedList.later[0], until: Date().addingTimeInterval(3600))
                 let row = try require(h.model.rankedList.snoozed.first)
-                try expect(h.model.affordances(for: row) == [.unsnooze, .rename, .delete], "got \(h.model.affordances(for: row).rawValue)")
+                try expect(h.model.presentation.affordances(for: row) == [.unsnooze, .rename, .delete], "got \(h.model.presentation.affordances(for: row).rawValue)")
             }
         }
 
@@ -334,7 +334,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
                 let row = try require(h.model.rankedList.later.first { $0.id == "m1" })
                 h.model.snooze(row, until: Date().addingTimeInterval(3600))
                 let snoozed = try require(h.model.rankedList.snoozed.first)
-                try expect(h.model.affordances(for: snoozed) == [.unsnooze, .dismiss])
+                try expect(h.model.presentation.affordances(for: snoozed) == [.unsnooze, .dismiss])
             }
         }
 
@@ -413,27 +413,12 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             }
             try expect(h.store.snoozedUntils(signalIds: [reminder.id])[reminder.id] == mondayMorning)
         }
-
-        r.run("Undo deletes the reminder and puts the Suggestion back") {
-            let h = await makeHarness(messageSignals: [suggestion(id: "Call the dentist")], now: friday)
-            await h.model.start()
-            let row = try await MainActor.run { try require(h.model.rankedList.suggested.first) }
-            await h.model.approve(row, snoozing: .tomorrow)
-            let reminderId = try require(h.taskSource.tasks.first { $0.title == "Call the dentist" }).id
-            await h.model.undo()
-            try expect(!h.taskSource.tasks.contains { $0.id == reminderId })
-            try expect(h.store.snoozedUntils(signalIds: [reminderId])[reminderId] == nil)
-            let (suggested, snoozed) = await MainActor.run { (h.model.rankedList.suggested.map(\.id), h.model.rankedList.snoozed) }
-            try expect(suggested == ["Call the dentist"], "got \(suggested)")
-            try expect(snoozed.isEmpty)
-        }
     }
 
     runner.suite("AppModel: Tomorrow and Next Week (ADR 0045)") { r in
         // A Friday at 4 PM, in whole seconds since the store keeps no finer.
         let friday = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 2, hour: 16))!
         let saturdayMorning = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 8))!
-        let mondayMorning = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 8))!
 
         r.run("Tomorrow snoozes until 8 AM the next day, judged by the injected clock") {
             let h = await makeHarness(tasks: [task(id: "r1", priority: .high)], now: friday)
@@ -457,86 +442,22 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
                 try expect(offer?.canUndo == true)
             }
         }
-
-        r.run("Undo of a snooze puts the row back with no snooze") {
-            let h = await makeHarness(tasks: [task(id: "r1")], now: friday)
-            await h.model.start()
-            await MainActor.run { h.model.snooze(h.model.rankedList.later[0], .tomorrow) }
-            await h.model.undo()
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] == nil)
-            let back = await MainActor.run { h.model.rankedList.later.contains { $0.id == "r1" } }
-            try expect(back)
-        }
-
-        r.run("Undo of a re-snooze puts back the earlier return time") {
-            let h = await makeHarness(tasks: [task(id: "r1")], now: friday)
-            await h.model.start()
-            await MainActor.run { h.model.snooze(h.model.rankedList.later[0], .tomorrow) }
-            await MainActor.run {
-                let snoozed = Signal(
-                    id: "r1", source: .reminders, sourceRef: "r1", label: "r1", originalText: "r1",
-                    createdAt: friday, provenance: .stated, snoozedUntil: saturdayMorning
-                )
-                h.model.snooze(snoozed, .nextWeek)
-            }
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] == mondayMorning)
-            await h.model.undo()
-            try expect(h.store.snoozedUntils(signalIds: ["r1"])["r1"] == saturdayMorning)
-        }
     }
 
-    runner.suite("AppModel.screenMode: which of the five screens wins") { r in
-        r.run("everything false, nil or empty shows empty") {
-            let h = await makeHarness()
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.screenMode == .empty) }
-        }
-
-        r.run("a non-empty list shows the list") {
-            let h = await makeHarness(tasks: [task(id: "f1", priority: .high)])
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.screenMode == .list) }
-        }
-
-        r.run("backfill beats everything else, including loading") {
-            let h = await makeHarness()
-            await MainActor.run {
-                h.model.isLoading = true
-                h.model.backfillProgress = (completed: 1, total: 10)
-            }
-            try await MainActor.run { try expect(h.model.screenMode == .backfill(completed: 1, total: 10)) }
-        }
-
-        r.run("loading beats empty and Zen") {
-            let h = await makeHarness(zen: true)
-            try await MainActor.run { try expect(h.model.screenMode == .loading, "isLoading starts true") }
-        }
-
+    runner.suite("AppModel: the screen follows its flags") { r in
         r.run("an empty list still shows the list, not empty, when a Source is unavailable") {
             let h = await makeHarness()
             await h.model.start()
             await setGate(.messages, .unavailable, in: h)
-            try await MainActor.run { try expect(h.model.screenMode == .list, "there's a Notice to show for the unreachable Source") }
+            try await MainActor.run { try expect(h.model.presentation.screenMode == .list, "there's a Notice to show for the unreachable Source") }
             await setGate(.messages, .available, in: h)
             await setGate(.reminders, .unavailable, in: h)
-            try await MainActor.run { try expect(h.model.screenMode == .list) }
+            try await MainActor.run { try expect(h.model.presentation.screenMode == .list) }
             await setGate(.reminders, .available, in: h)
             try await MainActor.run {
-                h.model.extractionUnavailable = true
-                try expect(h.model.screenMode == .list)
+                h.model.extraction.unload()
+                try expect(h.model.presentation.screenMode == .list)
             }
-        }
-
-        r.run("empty beats Zen") {
-            let h = await makeHarness(zen: true)
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.screenMode == .empty) }
-        }
-
-        r.run("Zen wins once the list is non-empty and nothing else takes precedence") {
-            let h = await makeHarness(tasks: [task(id: "f1", priority: .high)], zen: true)
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.screenMode == .zen) }
         }
 
         r.run("turning Zen off shows the list") {
@@ -544,74 +465,25 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             await h.model.start()
             try await MainActor.run {
                 h.model.isZenFocusModeEnabled = false
-                try expect(h.model.screenMode == .list)
+                try expect(h.model.presentation.screenMode == .list)
             }
         }
     }
 
-    runner.suite("AppModel.sections: which Sections exist, in order") { r in
+    runner.suite("AppModel: the Sections follow the list and its flags") { r in
         let everything = (
             tasks: [task(id: "f1", priority: .high), task(id: "l1")],
             messages: [suggestion(id: "s1")]
         )
-
-        r.run("with everything present: Suggested, Focus, then Later") {
-            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.sections.map(\.id) == ["suggested", "tier-focus", "tier-later"]) }
-        }
-
-        r.run("an empty Tier or an empty Suggested Tasks Inbox produces no Section") {
-            let h = await makeHarness(tasks: [task(id: "f1", priority: .high)])
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.sections.map(\.id) == ["tier-focus"]) }
-        }
-
-        r.run("Zen Focus Mode hides Suggested and Later, keeping Focus") {
-            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages, zen: true)
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.sections.map(\.id) == ["tier-focus"]) }
-        }
-
-        r.run("Zen Focus Mode with an empty Focus produces no Section") {
-            let h = await makeHarness(tasks: [task(id: "l1")], messageSignals: [suggestion(id: "s1")], zen: true)
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.sections.isEmpty) }
-        }
 
         r.run("toggling Zen updates the Sections") {
             let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
             await h.model.start()
             try await MainActor.run {
                 h.model.isZenFocusModeEnabled = true
-                try expect(h.model.sections.map(\.id) == ["tier-focus"])
+                try expect(h.model.presentation.sections.map(\.id) == ["tier-focus"])
                 h.model.isZenFocusModeEnabled = false
-                try expect(h.model.sections.map(\.id) == ["suggested", "tier-focus", "tier-later"])
-            }
-        }
-
-        r.run("every Notice appears in Messages, Reminders, Extraction order") {
-            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
-            await h.model.start()
-            await setGate(.reminders, .unavailable, in: h)
-            await setGate(.messages, .unavailable, in: h)
-            try await MainActor.run {
-                h.model.extractionUnavailable = true
-                try expect(h.model.sections.map(\.id) == [
-                    "notice-messagesUnavailable", "notice-remindersUnavailable", "notice-extractionUnavailable",
-                ])
-            }
-        }
-
-        r.run("a Notice sorts after every Signal-bearing Section") {
-            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages)
-            await h.model.start()
-            await setGate(.messages, .unavailable, in: h)
-            try await MainActor.run {
-                h.model.extractionUnavailable = true
-                try expect(h.model.sections.map(\.id) == [
-                    "tier-focus", "tier-later", "notice-messagesUnavailable", "notice-extractionUnavailable",
-                ])
+                try expect(h.model.presentation.sections.map(\.id) == ["suggested", "tier-focus", "tier-later"])
             }
         }
 
@@ -623,32 +495,7 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             await h.model.promote(row)
             try await MainActor.run {
                 try expect(h.model.remindersUnavailable)
-                try expect(h.model.sections.map(\.id) == ["notice-remindersUnavailable"], "got \(h.model.sections.map(\.id))")
-            }
-        }
-
-        r.run("the Snoozed Section comes after Later and before any Notice (ADR 0045)") {
-            let h = await makeHarness(tasks: everything.tasks + [task(id: "z1")], messageSignals: everything.messages)
-            await h.model.start()
-            try await MainActor.run {
-                let row = try require(h.model.rankedList.later.first { $0.id == "z1" })
-                h.model.snooze(row, until: Date().addingTimeInterval(3600))
-            }
-            await setGate(.messages, .unavailable, in: h)
-            try await MainActor.run {
-                try expect(h.model.sections.map(\.id) == [
-                    "tier-focus", "tier-later", "snoozed", "notice-messagesUnavailable",
-                ])
-            }
-        }
-
-        r.run("Zen Focus Mode hides the Snoozed Section") {
-            let h = await makeHarness(tasks: [task(id: "f1", priority: .high), task(id: "z1")], zen: true)
-            await h.model.start()
-            try await MainActor.run {
-                let row = try require(h.model.rankedList.later.first { $0.id == "z1" })
-                h.model.snooze(row, until: Date().addingTimeInterval(3600))
-                try expect(h.model.sections.map(\.id) == ["tier-focus"])
+                try expect(h.model.presentation.sections.map(\.id) == ["notice-remindersUnavailable"], "got \(h.model.presentation.sections.map(\.id))")
             }
         }
 
@@ -657,81 +504,29 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
             await h.model.start()
             try await MainActor.run {
                 h.model.snooze(h.model.rankedList.later[0], until: Date().addingTimeInterval(3600))
-                try expect(h.model.screenMode == .list, "got \(h.model.screenMode)")
-                try expect(h.model.sections.map(\.id) == ["snoozed"])
+                try expect(h.model.presentation.screenMode == .list, "got \(h.model.presentation.screenMode)")
+                try expect(h.model.presentation.sections.map(\.id) == ["snoozed"])
             }
-        }
-
-        r.run("no flag set produces no Notice") {
-            let h = await makeHarness()
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.sections.isEmpty) }
         }
 
         r.run("extraction coming back removes its Notice") {
             let h = await makeHarness()
             await h.model.start()
             try await MainActor.run {
-                h.model.extractionUnavailable = true
-                try expect(h.model.sections.map(\.id) == ["notice-extractionUnavailable"])
-                h.model.extractionUnavailable = false
-                try expect(h.model.sections.isEmpty)
+                h.model.extraction.unload()
+                try expect(h.model.presentation.sections.map(\.id) == ["notice-extractionUnavailable"])
             }
+            await h.model.retryLoadingExtractor()
+            try await MainActor.run { try expect(h.model.presentation.sections.isEmpty) }
         }
 
         r.run("a Gate coming back removes its Notice") {
             let h = await makeHarness()
             await h.model.start()
             await setGate(.reminders, .unavailable, in: h)
-            try await MainActor.run { try expect(h.model.sections.map(\.id) == ["notice-remindersUnavailable"]) }
+            try await MainActor.run { try expect(h.model.presentation.sections.map(\.id) == ["notice-remindersUnavailable"]) }
             await setGate(.reminders, .available, in: h)
-            try await MainActor.run { try expect(h.model.sections.isEmpty) }
-        }
-
-        r.run("a Notice survives Zen Focus Mode, even with an empty Focus") {
-            let h = await makeHarness(tasks: everything.tasks, messageSignals: everything.messages, zen: true)
-            await h.model.start()
-            await setGate(.messages, .unavailable, in: h)
-            try await MainActor.run {
-                try expect(h.model.sections.map(\.id) == ["tier-focus", "notice-messagesUnavailable"])
-            }
-            let empty = await makeHarness(zen: true)
-            await empty.model.start()
-            await setGate(.messages, .unavailable, in: empty)
-            try await MainActor.run {
-                try expect(empty.model.sections.map(\.id) == ["notice-messagesUnavailable"])
-            }
-        }
-
-        r.run("Suggested carries raw Signals, never grouped") {
-            let h = await makeHarness(messageSignals: [
-                suggestion(id: "s1", sourceRef: "m1", lowConfidence: true),
-                suggestion(id: "s2", sourceRef: "m1", lowConfidence: true),
-            ])
-            await h.model.start()
-            try await MainActor.run {
-                guard case .suggested(let signals) = h.model.sections.first else {
-                    throw TestFailure(message: "expected .suggested first")
-                }
-                try expect(signals.count == 2)
-            }
-        }
-
-        r.run("a Tier groups a same-source, low-confidence run") {
-            let stated = ["b1", "b2"].map {
-                Signal(
-                    id: $0, source: .messages, sourceRef: "m1", label: $0, originalText: "milk and eggs",
-                    createdAt: Date(), provenance: .stated, lowConfidence: true
-                )
-            }
-            let h = await makeHarness(messageSignals: stated)
-            await h.model.start()
-            try await MainActor.run {
-                guard case .tier(.later, let groups) = h.model.sections.last else {
-                    throw TestFailure(message: "expected .tier(.later, _) last, got \(h.model.sections.map(\.id))")
-                }
-                try expect(groups.count == 1)
-            }
+            try await MainActor.run { try expect(h.model.presentation.sections.isEmpty) }
         }
     }
 }

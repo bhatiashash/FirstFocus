@@ -6,7 +6,9 @@ import Foundation
 /// `historyBatchOffers`; each action here checks it against facts read at
 /// that moment, so a button drawn before something changed does nothing.
 ///
-/// Owned by `AppModel`, which it reaches back to for the Signal Board.
+/// Owned by `AppModel`. Writes to Messages Signals go through the Signal
+/// Board, which keeps its share current; AppModel is told so it can show
+/// them.
 /// `HistoryViewModel` sets `onChange` and re-reads History whenever it
 /// fires: after every action, when a Messages pass ends, and when the
 /// loaded model changes.
@@ -16,6 +18,7 @@ public final class HistoryBatchActions {
     public var onChange: (() -> Void)?
 
     private weak var app: AppModel?
+    private let board: SignalBoard
     private let intake: MessagesIntake
     private let historyStore: any HistoryStore
     private let signalStore: any BatchLedger & MessagesIntakeState
@@ -25,10 +28,11 @@ public final class HistoryBatchActions {
     private let screeningSettings: ScreeningSettings
 
     init(
-        app: AppModel, intake: MessagesIntake, historyStore: any HistoryStore, signalStore: any BatchLedger & MessagesIntakeState,
+        app: AppModel, board: SignalBoard, intake: MessagesIntake, historyStore: any HistoryStore, signalStore: any BatchLedger & MessagesIntakeState,
         corrections: Corrections, screeningSettings: ScreeningSettings
     ) {
         self.app = app
+        self.board = board
         self.intake = intake
         self.historyStore = historyStore
         self.signalStore = signalStore
@@ -85,7 +89,8 @@ public final class HistoryBatchActions {
     public func notForMe(_ batch: HistoryBatch) {
         guard isEnabled(.notForMe, for: batch), let target = notForMeTarget(batch) else { return }
         try? corrections.recordNotForMe(target.row)
-        app?.dismissMessages(sourceRef: target.sourceRef)
+        board.dismiss(sourceRef: target.sourceRef)
+        app?.boardChanged()
         changed()
     }
 
@@ -125,7 +130,8 @@ public final class HistoryBatchActions {
         // so History and the Inbox never disagree about the mark.
         do { try corrections.removeNotForMe(fromBatch: sourceRef) } catch { return [] }
         let reopened = signalStore.notForMeDismissals(ofBatch: sourceRef)
-        app?.reopenMessageSignals(reopened)
+        board.reopen(signalIds: reopened)
+        app?.boardChanged()
         changed()
         return reopened
     }
@@ -154,10 +160,11 @@ public final class HistoryBatchActions {
         guard !label.isEmpty, historyBatchOffers(for: batch, facts: facts)[.addTask] == .enabled,
               let target = addTaskTarget(batch, facts: facts), let transcript = target.row.transcript else { return }
         try? corrections.recordMissedTask(label: label, for: target.row)
-        app?.addMessageSignal(messagesSuggestion(
+        board.add(messagesSuggestion(
             label: label, sourceRef: target.sourceRef, chatId: target.chatId, transcript: transcript,
             isSelfThread: target.row.isSelfThread, chatIdentifier: target.row.chatIdentifier
         ))
+        app?.boardChanged()
         changed()
     }
 
@@ -208,9 +215,9 @@ public final class HistoryBatchActions {
     public func restore(_ batch: HistoryBatch) {
         guard isEnabled(.restore, for: batch), let sourceRef = batch.sourceRef else { return }
         for supersession in signalStore.supersessions(byBatches: [sourceRef])[sourceRef] ?? [] where supersession.isRestorable {
-            _ = try? signalStore.restore(signalId: supersession.signalId, supersededIn: sourceRef)
+            board.restore(signalId: supersession.signalId, supersededIn: sourceRef)
         }
-        app?.reloadMessageSignals()
+        app?.boardChanged()
         changed()
     }
 

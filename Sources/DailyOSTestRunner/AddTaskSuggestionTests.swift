@@ -45,7 +45,7 @@ private func makeHarness(messages: [ChatMessage], responses: [String: String]) a
             d.foregroundObserver = FakeForegroundObserver()
             d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-            d.extractor = FakeIntentExtractor(responses: responses)
+            d.loadModel = { _, _ in FakeIntentExtractor(responses: responses) }
             d.historyStore = history
             d.correctionStore = FakeCorrectionStore()
             d.screeningSettings = screening

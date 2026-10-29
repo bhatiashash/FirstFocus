@@ -114,11 +114,24 @@ public final class SignalBoard {
         }
     }
 
-    /// Replaces the Messages share with Signals read back from the store
-    /// (ADR 0035) rather than from a pass. Reads nothing from Messages, so
-    /// it leaves the Source's availability as the last pass found it.
-    public func seed(messages signals: [Signal]) {
-        messageSignals = signals
+    /// Fills the Messages share from the store (ADR 0035) rather than from
+    /// a pass, as launch does before the model loads. Reads nothing from
+    /// Messages, so it leaves the Source's availability as the last pass
+    /// found it.
+    public func loadStoredMessages() {
+        rereadMessages()
+    }
+
+    /// After every write the Board makes to Messages state, the share is
+    /// what the store says (board-messages-share), so no caller re-reads
+    /// it. Left empty while the last read found Messages Unavailable,
+    /// as `apply(messages: .unavailable)` leaves it.
+    private func rereadMessages() {
+        guard availability(of: .messages) == .available else {
+            messageSignals = []
+            return
+        }
+        messageSignals = signalStore.openSignals()
     }
 
     // MARK: - Reading
@@ -198,14 +211,33 @@ public final class SignalBoard {
     /// (CONTEXT.md: Dismiss).
     public func dismiss(_ signal: Signal) {
         guard signal.source == .messages else { return }
-        messageSignals.removeAll { $0.id == signal.id }
         try? signalStore.dismiss(signalId: signal.id)
+        rereadMessages()
     }
 
-    /// Undo of a Dismiss (inbox-undo): the Signal is open again in the
-    /// store. The caller re-reads stored Signals onto the Board.
-    public func reopen(signalId: String) {
-        try? signalStore.reopen(signalId: signalId)
+    /// Undo of a Dismiss or of "Not for me" (inbox-undo): the Signals are
+    /// open again.
+    public func reopen(signalIds: [String]) {
+        for id in signalIds { try? signalStore.reopen(signalId: id) }
+        rereadMessages()
+    }
+
+    /// History's Restore (ADR 0040): puts a Superseded Signal back, if
+    /// its Supersession is still restorable. Returns whether it was.
+    @discardableResult
+    public func restore(signalId: String, supersededIn batchId: String) -> Bool {
+        let restored = (try? signalStore.restore(signalId: signalId, supersededIn: batchId)) ?? false
+        rereadMessages()
+        return restored
+    }
+
+    /// Stores one more Signal against its already-Processed source item,
+    /// as re-extraction does (ADR 0004). Returns whether the write took.
+    @discardableResult
+    public func add(_ signal: Signal) -> Bool {
+        let added = (try? signalStore.recordReExtractedSignals(sourceRef: signal.sourceRef, signals: [signal])) != nil
+        rereadMessages()
+        return added
     }
 
     /// One-click promotion (ticket 05). A Reminders Signal writes through
@@ -218,9 +250,9 @@ public final class SignalBoard {
     /// these and no other (inbox-undo).
     public func dismiss(sourceRef: String) {
         for signal in messageSignals where signal.sourceRef == sourceRef {
-            messageSignals.removeAll { $0.id == signal.id }
             try? signalStore.dismissByNotForMe(signalId: signal.id)
         }
+        rereadMessages()
     }
 
     public func promote(_ signal: Signal) async {
@@ -251,9 +283,9 @@ public final class SignalBoard {
             await Task.detached { try? taskSource.update(id: id, .priority(priority)) }.value
             await refreshReminders()
         case .messages:
-            guard let index = messageSignals.firstIndex(where: { $0.id == signal.id }) else { return }
-            messageSignals[index].priority = priority
+            guard messageSignals.contains(where: { $0.id == signal.id }) else { return }
             writeLocally(signal.id)
+            rereadMessages()
         }
     }
 
@@ -288,21 +320,21 @@ public final class SignalBoard {
         if let sender = signal.sender, isResolvedSenderName(sender) {
             try? signalStore.recordApprovedSender(reminderId: created.id, sender: sender)
         }
-        messageSignals.removeAll { $0.id == signal.id }
+        rereadMessages()
         await refreshReminders()
         return created.id
     }
 
     /// Undo of an Approve (inbox-undo, ADR 0043): deletes the reminder by
     /// the id Approve returned, whatever became of it since (already gone
-    /// is fine), forgets its Sender, and puts the Signal back to open. The
-    /// caller re-reads stored Signals onto the Board.
+    /// is fine), forgets its Sender, and puts the Signal back to open.
     public func unapprove(signalId: String, reminderId: String) async {
         let taskSource = self.taskSource
         await Task.detached { try? taskSource.delete(id: reminderId) }.value
         try? signalStore.forgetApprovedSender(reminderId: reminderId)
         snoozes.end(signalId: reminderId)
         try? signalStore.reopen(signalId: signalId)
+        rereadMessages()
         await refreshReminders()
     }
 

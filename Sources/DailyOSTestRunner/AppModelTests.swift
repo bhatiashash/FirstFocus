@@ -70,7 +70,7 @@ private func makeHarness(
         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
         d.reExtractionSettings = reExtractionSettings
         d.undoClock = undoClock
-        d.extractor = extractor
+        d.loadModel = { _, _ in extractor }
         d.historyStore = historyStore
         d.correctionStore = correctionStore
         d.apiKeyStore = FakeAPIKeyStore()
@@ -382,7 +382,7 @@ func registerAppModelTests(_ runner: TestRunner) {
             let h = await MainActor.run { makeHarness() }
             await MainActor.run {
                 h.model.isLoading = false
-                h.model.extractionUnavailable = true
+                h.model.extraction.unload()
             }
             try await MainActor.run { try expect(h.model.canReExtract == false) }
         }
@@ -445,6 +445,7 @@ func registerAppModelTests(_ runner: TestRunner) {
                 id: "m1", chatId: 1, isFromMe: false, text: "call the dentist tomorrow", createdAt: Date()
             )
             let h = await MainActor.run { makeHarness(messagesList: [msg]) }
+            await h.model.extraction.load()
             await h.model.reloadMessages()
             try expect(h.extractor.callPriorities == [.background], "an automated refresh must never contend with the UI for the main thread")
         }
@@ -454,6 +455,7 @@ func registerAppModelTests(_ runner: TestRunner) {
                 id: "m1", chatId: 1, isFromMe: false, text: "call the dentist tomorrow", createdAt: Date()
             )
             let h = await MainActor.run { makeHarness(messagesList: [msg]) }
+            await h.model.extraction.load()
             await h.model.reloadMessages()
             try expect(h.extractor.callPriorities == [.background], "the automated pass processes the message first")
 
@@ -470,6 +472,7 @@ func registerAppModelTests(_ runner: TestRunner) {
         r.run("a message the model finds work in is recorded to the History store") {
             let msg = ChatMessage(id: "m1", chatId: 1, isFromMe: false, text: "call the dentist", createdAt: Date())
             let h = await MainActor.run { makeHarness(messagesList: [msg]) }
+            await h.model.extraction.load()
             await h.model.reloadMessages()
             let recorded = h.historyStore.allRows()
             try expect(recorded.count == 1)
@@ -478,6 +481,8 @@ func registerAppModelTests(_ runner: TestRunner) {
 
         r.run("activeModelDisplayName reflects whichever extractor is currently loaded") {
             let h = await MainActor.run { makeHarness() }
+            try await MainActor.run { try expect(h.model.activeModelDisplayName == nil, "nothing loads before start") }
+            await h.model.extraction.load()
             try await MainActor.run {
                 try expect(h.model.activeModelDisplayName == "Fake Model")
             }
@@ -485,6 +490,7 @@ func registerAppModelTests(_ runner: TestRunner) {
 
         r.run("rerun replays a History entry's stored input through the currently loaded model and appends a new entry") {
             let h = await MainActor.run { makeHarness() }
+            await h.model.extraction.load()
             let original = HistoryEntry(
                 sourceRawText: "call the dentist", rawOutput: "NONE", modelUsed: "Some Other Model", signalCount: 0,
                 sourceRef: "m1"

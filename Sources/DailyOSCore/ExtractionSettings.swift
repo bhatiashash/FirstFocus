@@ -74,7 +74,7 @@ public struct ExtractionSettings: @unchecked Sendable {
         nonmutating set { defaults.set(newValue, forKey: Self.modelPathKey) }
     }
 
-    /// What `AppModel.loadExtractor()` should actually pass to
+    /// What `ExtractionHost.load()` should actually pass to
     /// `LlamaCppIntentExtractor.init(modelPath:)`: the stored override if
     /// it's non-blank, the built-in default path otherwise — clearing the
     /// field in Settings falls back cleanly rather than pointing at an

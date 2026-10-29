@@ -55,14 +55,14 @@ public final class SettingsViewModel: ObservableObject {
 
     private let extractionSettings: ExtractionSettings
     private let reExtractionSettings: ReExtractionSettings
-    private let model: any ExtractionReloading
+    private let extraction: ExtractionHost
 
     public init(
-        extractionSettings: ExtractionSettings, reExtractionSettings: ReExtractionSettings, model: any ExtractionReloading
+        extractionSettings: ExtractionSettings, reExtractionSettings: ReExtractionSettings, extraction: ExtractionHost
     ) {
         self.extractionSettings = extractionSettings
         self.reExtractionSettings = reExtractionSettings
-        self.model = model
+        self.extraction = extraction
         self.prompt = extractionSettings.effectivePromptOverride ?? LlamaCppIntentExtractor.defaultExtractionPrompt
         self.setAsidePrompt = extractionSettings.setAsidePromptOverride
         self.promptStatus = Self.status(of: extractionSettings)
@@ -123,9 +123,9 @@ public final class SettingsViewModel: ObservableObject {
 
         isReloading = true
         statusMessage = nil
-        await model.applyExtractionSettingsChange()
+        await extraction.applySettingsChange()
         isReloading = false
-        let succeeded = !model.extractionUnavailable
+        let succeeded = !extraction.isUnavailable
         statusMessage = succeeded
             ? "Saved. Extraction is using the new prompt."
             : "Couldn't load the model — check Models and try again."

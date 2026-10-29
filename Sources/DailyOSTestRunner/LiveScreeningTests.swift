@@ -86,8 +86,8 @@ func registerLiveScreeningTests(_ runner: TestRunner) {
 
         r.run("the view model offers live only once a cutoff has been chosen") {
             let settings = ScreeningSettings(defaults: UserDefaults(suiteName: "DailyOSTests-\(UUID().uuidString)")!)
-            let app = await MainActor.run { FakeScreeningConfiguring() }
-            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: FakeAPIKeyStore(), app: app) }
+            let app = await MainActor.run { TestExtraction() }
+            let viewModel = await MainActor.run { ScreeningSettingsViewModel(settings: settings, keyStore: FakeAPIKeyStore(), extraction: app.host) }
             try await MainActor.run {
                 try expect(!viewModel.canGoLive)
                 try expect(viewModel.cutoff == 0.5, "the stepper starts at 0.5, but nothing is stored until it's set")
@@ -150,7 +150,7 @@ func registerLiveScreeningTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = extractor
+                    d.loadModel = { _, _ in extractor }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = corrections
                     d.screeningSettings = settings
@@ -199,6 +199,7 @@ func registerLiveScreeningTests(_ runner: TestRunner) {
 
         r.run("History re-reads after This was work, so the Batch shows as Corrected") {
             let app = await MainActor.run { makeHistoryApp() }
+            await app.model.extraction.load()
             try app.history.record(HistoryEntry(
                 sourceRawText: "x", modelUsed: "JEV", signalCount: 0, chatId: 3,
                 kind: .screening(ScreeningDecision(probability: 0.1, mode: .live(cutoff: 0.4))), sourceRef: "m1"

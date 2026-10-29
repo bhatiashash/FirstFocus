@@ -482,6 +482,110 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         }
     }
 
+    runner.suite("SignalBoard: its Messages share follows its own writes") { r in
+        r.run("launch fills the share from the store, before any pass") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk", provenance: .inferred)])
+                board.loadStoredMessages()
+                try expect(board.rankedList(now: now).suggested.map(\.label) == ["Buy milk"])
+            }
+        }
+
+        r.run("Dismiss then reopen shows the Suggestion again with no other step") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk", provenance: .inferred)])
+                board.loadStoredMessages()
+                let signal = board.rankedList(now: now).suggested[0]
+                board.dismiss(signal)
+                try expect(board.rankedList(now: now).suggested.isEmpty)
+                board.reopen(signalIds: [signal.id])
+                try expect(board.rankedList(now: now).suggested.map(\.id) == [signal.id])
+            }
+        }
+
+        r.run("several ids reopen in one call") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [
+                    messageSignal(id: "s1", label: "Buy milk", provenance: .inferred),
+                    messageSignal(id: "s2", label: "Call mum", provenance: .inferred),
+                ])
+                board.loadStoredMessages()
+                board.dismiss(sourceRef: "m1")
+                try expect(board.rankedList(now: now).suggested.isEmpty)
+                board.reopen(signalIds: ["s1", "s2"])
+                try expect(Set(board.rankedList(now: now).suggested.map(\.id)) == ["s1", "s2"])
+            }
+        }
+
+        r.run("Approve then unapprove shows the Suggestion and no reminder") {
+            let now = Date()
+            let (board, taskSource, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk", provenance: .inferred)])
+                board.loadStoredMessages()
+            }
+            let signal = await MainActor.run { board.rankedList(now: now).suggested[0] }
+            let reminderId = try require(await board.approve(signal))
+            try await MainActor.run { try expect(board.rankedList(now: now).suggested.isEmpty) }
+            await board.unapprove(signalId: signal.id, reminderId: reminderId)
+            try await MainActor.run {
+                let list = board.rankedList(now: now)
+                try expect(list.suggested.map(\.id) == [signal.id])
+                try expect(list.focus.isEmpty && list.later.isEmpty)
+                try expect(taskSource.tasks.isEmpty)
+            }
+        }
+
+        r.run("promoting a Messages Signal leaves the share as the store says") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [messageSignal(label: "Buy milk")])
+                board.loadStoredMessages()
+            }
+            let signal = await MainActor.run { board.rankedList(now: now).later[0] }
+            await board.promote(signal)
+            try await MainActor.run {
+                try expect(board.rankedList(now: now).focus.map(\.id) == [signal.id])
+                try expect(store.openSignals().first?.priority == .high)
+            }
+        }
+
+        r.run("add shows the new Signal at once") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [])
+                board.loadStoredMessages()
+                try expect(board.add(messageSignal(id: "s9", label: "Send the invoice", provenance: .inferred)))
+                try expect(board.rankedList(now: now).suggested.map(\.id) == ["s9"])
+            }
+        }
+
+        r.run("a re-read while Messages is Unavailable leaves the share empty") {
+            let now = Date()
+            let (board, _, _, store) = await MainActor.run { makeBoard() }
+            try await MainActor.run {
+                try store.recordOneMessageBatch("m1", signals: [
+                    messageSignal(id: "s1", label: "Buy milk", provenance: .inferred),
+                    messageSignal(id: "s2", label: "Call mum", provenance: .inferred),
+                ])
+                board.loadStoredMessages()
+                let signal = board.rankedList(now: now).suggested.first { $0.id == "s1" }!
+                board.dismiss(signal)
+                board.apply(messages: .unavailable)
+                board.reopen(signalIds: ["s1"])
+                try expect(board.rankedList(now: now).suggested.isEmpty, "the Notice and the list agree")
+            }
+        }
+    }
+
     runner.suite("SignalBoard: approve turns a suggestion into a real reminder") { r in
         r.run("approving removes the Signal from Suggested and it reappears as a Reminders Signal") {
             let now = Date()

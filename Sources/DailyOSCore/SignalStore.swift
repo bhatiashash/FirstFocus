@@ -64,10 +64,9 @@ public protocol BatchLedger: Sendable {
     /// the store noted this is not among them.
     func notForMeDismissals(ofBatch batchId: String) -> [String]
 
-    /// Every stored Signal still in the `open` state. The one place
-    /// Messages Intake reads back what Extraction (and everything since)
-    /// has produced — `SignalBoard` never calls this directly, it only
-    /// ever sees Intake's return value.
+    /// Every stored Signal still in the `open` state: what Messages Intake
+    /// hands back from a pass, and what `SignalBoard` re-reads after its
+    /// own writes (ADR 0021 note, board-messages-share).
     func openSignals() -> [Signal]
 
     /// Processed Messages items with no open, checked-off, or approved
@@ -322,6 +321,17 @@ public protocol SignalBoardStore: Sendable {
     /// `approvedSender(reminderId:)`, batched — see `focusOrders(signalIds:)`.
     func approvedSenders(reminderIds: [String]) -> [String: String]
 
+    // The Board re-reads its Messages share after each of its own writes
+    // (board-messages-share), so these three are its calls as well as
+    // the Batch Ledger's.
+
+    /// Every stored Signal still open: the Board's Messages share.
+    func openSignals() -> [Signal]
+    /// History's Restore, made through the Board.
+    func restore(signalId: String, supersededIn batchId: String) throws -> Bool
+    /// One more Signal against an already-Processed source item, as
+    /// re-extraction and "This was work"'s Add Task make it.
+    func recordReExtractedSignals(sourceRef: String, signals: [Signal]) throws
 }
 
 /// Snooze's record (ticket 04, ADR 0045), whose one caller is the Snooze

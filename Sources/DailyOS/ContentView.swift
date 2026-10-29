@@ -59,7 +59,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                if model.isAddingTask && !model.showsFocus {
+                if model.isAddingTask && !model.presentation.showsFocus {
                     NewReminderRow { title, dueAt in
                         addReminder(title: title, dueAt: dueAt)
                     } onClose: {
@@ -122,10 +122,10 @@ struct ContentView: View {
     }
 
     /// The precedence among the five screens below is decided by
-    /// `AppModel.screenMode`, not here — this only switches over it.
+    /// `ListPresentation.screenMode`, not here — this only switches over it.
     @ViewBuilder
     private var mainContent: some View {
-        switch model.screenMode {
+        switch model.presentation.screenMode {
         case .backfill(let completed, let total):
             BackfillProgressView(completed: completed, total: total)
         case .loading:
@@ -291,7 +291,7 @@ struct ContentView: View {
         // no chevron — this is a "what should I work on next" tool, and
         // letting its one unmissable tier hide itself would undercut the
         // point; Later gets a chevron, so a long Later list can be tucked
-        // away. `AppModel.sections` is the one place any of that —
+        // away. `ListPresentation.sections` is the one place any of that —
         // including Zen Focus Mode hiding Suggested and Later outright —
         // is decided; this only draws it.
         //
@@ -302,7 +302,7 @@ struct ContentView: View {
         // to fight, so separation is genuinely padding alone, all the way
         // down. The collapse chevron below is a plain button on that same
         // plain row, not `Section(isExpanded:)`, for the same reason.
-        ForEach(model.sections) { section in
+        ForEach(model.presentation.sections) { section in
             switch section {
             case .suggested(let suggestedSignals):
                 SectionHeaderText("Suggested", isCollapsed: model.isCollapsed(.inbox)) {
@@ -452,15 +452,15 @@ struct ContentView: View {
         }
     }
 
-    /// Which actions `signal`'s row offers — `AppModel.affordances(for:)`
+    /// Which actions `signal`'s row offers — `ListPresentation.affordances(for:)`
     /// decides this (candidate 4, ADR 0023) against the moment the list
     /// was ranked, not this view.
     @ViewBuilder
     private func signalRow(for signal: Signal, groupPosition: SignalRow.GroupPosition?) -> some View {
         SignalRow(
             signal: signal,
-            affordances: model.affordances(for: signal),
-            isOverdue: model.isOverdue(signal),
+            affordances: model.presentation.affordances(for: signal),
+            isOverdue: model.presentation.isOverdue(signal),
             drawer: rowDrawer(for: signal),
             isExpanded: expandedRowId == signal.id,
             perform: { action in perform(action, on: signal) },
@@ -849,7 +849,7 @@ struct SignalRow: View {
 
     let signal: Signal
     /// Which of `SignalRowAction`'s cases this row currently offers —
-    /// `affordances(for:isLater:now:)` decided this once, upstream, from the
+    /// `ListPresentation.affordances(for:)` decided this once, upstream, from the
     /// Signal and its Tier alone. Check off and snoozing aren't in
     /// here: every row offers both unconditionally, so there's nothing to
     /// decide about them.
@@ -1088,7 +1088,7 @@ struct SignalRow: View {
             // every row, regardless of which buttons are reserved.
             // One slot, not two: `.promote` (Later only) and `.demote`
             // (Focus only, priority-driven rows only — see
-            // `affordances(for:isLater:now:)`'s own doc comment) are mutually
+            // `ListPresentation.affordances(for:)`'s own doc comment) are mutually
             // exclusive, so sharing a slot keeps every row's total reserved
             // trailing width identical whether it shows an up arrow, a
             // down arrow, or nothing.

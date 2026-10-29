@@ -19,7 +19,8 @@ public final class MessagesIntake {
     /// to reading and garbage collecting but skipping extraction when it's
     /// `nil` — the same "surface it, never block" treatment ticket 10
     /// gives a missing Gate.
-    public var extractor: (any IntentExtractor)?
+    /// Written only by `ExtractionHost` (extraction-host), or once at init.
+    public internal(set) var extractor: (any IntentExtractor)?
 
     /// Screening (ADR 0036), set by the app from Screening settings and the
     /// stored API key. `.off` or `nil` means nothing leaves the Mac. A
@@ -36,7 +37,8 @@ public final class MessagesIntake {
 
     /// Sets the Screener and mode together, so no Batch sees one changed
     /// and not the other.
-    public func setScreening(_ screener: (any Screener)?, mode: ScreeningMode) {
+    /// `ExtractionHost`'s way in (extraction-host).
+    func setScreening(_ screener: (any Screener)?, mode: ScreeningMode) {
         screening.set(screener: screener, mode: mode)
     }
 
@@ -159,23 +161,6 @@ public final class MessagesIntake {
             "(was \(stored ?? "unknown"), now \(current)); Full Disk Access will need to be re-granted.\n"
         FileHandle.standardError.write(Data(message.utf8))
         return true
-    }
-
-    /// The Signals already in the store, read with no chat.db access and no
-    /// model call at all (ADR 0035) — what the window can show the instant it opens,
-    /// before any pass has run. `refresh` is the only thing that *adds* to
-    /// this; everything it has ever added is still here on the next launch,
-    /// which is why waiting for a pass before showing anything is pure
-    /// delay rather than correctness.
-    public func storedSignals() -> [Signal] {
-        signalStore.openSignals()
-    }
-
-    /// Stores one more Signal against a source item that is already
-    /// Processed, as re-extraction does (ADR 0004). Returns whether the
-    /// write took.
-    public func addSignal(_ signal: Signal) -> Bool {
-        (try? signalStore.recordReExtractedSignals(sourceRef: signal.sourceRef, signals: [signal])) != nil
     }
 
     /// The one pass currently running, if any, whichever kind it is (ADR

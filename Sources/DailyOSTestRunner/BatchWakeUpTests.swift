@@ -132,7 +132,7 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = extractor
+                    d.loadModel = { _, _ in extractor }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()

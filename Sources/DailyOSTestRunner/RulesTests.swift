@@ -87,36 +87,38 @@ func registerRulesTests(_ runner: TestRunner) {
     }
 
     runner.suite("RulesViewModel") { r in
-        r.run("adding, editing and deleting a Rule each reach the app, which hands the new set to the extractor") {
+        r.run("adding, editing and deleting a Rule each hand the new set to the loaded model") {
             let store = FakeRuleStore()
-            let app = await MainActor.run { FakeRulesConfiguring() }
-            let viewModel = await MainActor.run { RulesViewModel(store: store, app: app) }
-            await MainActor.run {
+            let extraction = await MainActor.run { TestExtraction(ruleStore: store) }
+            await extraction.host.load()
+            let viewModel = await MainActor.run { RulesViewModel(store: store, extraction: extraction.host) }
+            try await MainActor.run {
                 viewModel.draft = "Shipping updates are never tasks"
                 viewModel.addDraft()
+                try expect(extraction.extractor.rules == ["Shipping updates are never tasks"])
             }
             let id = try require(store.stored.first?.id)
-            await MainActor.run {
-                viewModel.update(id: id, text: "Delivery notices are never tasks")
-                viewModel.delete(id: id)
-            }
             try await MainActor.run {
-                try expect(app.applyCount == 3)
+                viewModel.update(id: id, text: "Delivery notices are never tasks")
+                try expect(extraction.extractor.rules == ["Delivery notices are never tasks"])
+                viewModel.delete(id: id)
+                try expect(extraction.extractor.rules.isEmpty)
                 try expect(viewModel.rules.isEmpty)
                 try expect(viewModel.draft.isEmpty)
             }
         }
 
-        r.run("a sixth Rule is refused with a reason, and the app is not asked to reload") {
+        r.run("a sixth Rule is refused with a reason, and the model keeps the five") {
             let store = FakeRuleStore()
             for i in 1...5 { _ = try store.add("Rule \(i)") }
-            let app = await MainActor.run { FakeRulesConfiguring() }
-            let viewModel = await MainActor.run { RulesViewModel(store: store, app: app) }
+            let extraction = await MainActor.run { TestExtraction(ruleStore: store) }
+            await extraction.host.load()
+            let viewModel = await MainActor.run { RulesViewModel(store: store, extraction: extraction.host) }
             try await MainActor.run {
                 viewModel.draft = "Rule 6"
                 viewModel.addDraft()
                 try expect(viewModel.errorMessage?.contains("Delete one first") == true, "got \(viewModel.errorMessage ?? "nil")")
-                try expect(app.applyCount == 0)
+                try expect(extraction.extractor.rules.count == 5)
                 try expect(viewModel.rules.count == 5)
             }
         }
@@ -140,7 +142,7 @@ func registerRulesTests(_ runner: TestRunner) {
                     d.foregroundObserver = FakeForegroundObserver()
                     d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
                     d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-                    d.extractor = extractor
+                    d.loadModel = { _, _ in extractor }
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()
@@ -152,7 +154,7 @@ func registerRulesTests(_ runner: TestRunner) {
             await h.model.start()
             try expect(h.extractor.rules == ["Shipping updates are never tasks"])
             _ = try h.rules.add("Delivery notices are never tasks")
-            await MainActor.run { h.model.applyRules() }
+            await MainActor.run { h.model.extraction.applyRules() }
             try expect(h.extractor.rules == ["Shipping updates are never tasks", "Delivery notices are never tasks"])
         }
     }

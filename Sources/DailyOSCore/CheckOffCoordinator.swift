@@ -32,6 +32,9 @@ public final class CheckOffCoordinator {
     /// Set once the app is about to quit: a write can't be left to a task
     /// the process won't live to run.
     private var writesInline = false
+    /// Every write still running, so `settled()` can wait for them.
+    private var writes: [Int: Task<Void, Never>] = [:]
+    private var nextWrite = 0
 
     public init(taskSource: any TaskSource, signalStore: any CheckOffStore) {
         self.taskSource = taskSource
@@ -67,14 +70,23 @@ public final class CheckOffCoordinator {
 
         let taskSource = self.taskSource
         let signalStore = self.signalStore
-        Task {
+        let key = nextWrite
+        nextWrite += 1
+        writes[key] = Task {
             try? await Task.detached {
                 try writeCheckOff(signal, taskSource: taskSource, signalStore: signalStore)
             }.value
             await self.onCommitted()
             self.committing[signal.id] = nil
+            self.writes[key] = nil
             self.onChange()
         }
+    }
+
+    /// Returns once every write started so far has landed and its id is
+    /// no longer hidden. For tests.
+    public func settled() async {
+        while let write = writes.values.first { await write.value }
     }
 }
 
