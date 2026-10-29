@@ -181,6 +181,9 @@ public final class AppModel: ObservableObject {
     @Published public var isFocusListEnabled: Bool {
         didSet { focusList.isEnabled = isFocusListEnabled }
     }
+    /// The Reminders lists the Focus list can draw from, with their ticks,
+    /// as of the last `refreshFocusListTicks()`.
+    @Published public private(set) var focusListTicks: [FocusListTick] = []
     /// Held directly, alongside handing the same instance to `board` at
     /// init, purely for `start()`'s one-time Gate request — requesting
     /// access is a launch-time action, not part of reading or ranking, so
@@ -771,6 +774,19 @@ public final class AppModel: ObservableObject {
     /// leads to. For tests.
     public func focusListSettled() async {
         await focusList.settled()
+    }
+
+    /// Reads Reminders' lists again, for Advanced as it opens.
+    public func refreshFocusListTicks() async {
+        focusListTicks = await focusList.lists()
+    }
+
+    /// Ticks or unticks a list in Advanced.
+    public func setFocusListTick(_ isTicked: Bool, listId: String) {
+        focusList.setTicked(isTicked, listId: listId)
+        focusListTicks = focusListTicks.map {
+            $0.id == listId ? FocusListTick(list: $0.list, isTicked: isTicked) : $0
+        }
     }
 
     /// The Morning Brief's text (ADR 0046), from the Ranked List derived

@@ -59,6 +59,17 @@ public struct CheckedOffReminder: Equatable, Sendable, Identifiable {
     }
 }
 
+/// A list in Reminders, for the Focus list's ticks in Advanced (ADR 0048).
+public struct ReminderList: Equatable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+
+    public init(id: String, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
 /// The fields needed to create a reminder. No `id` or `createdAt`: both are
 /// assigned by Reminders itself at creation time, not chosen by the caller.
 public struct ReminderDraft: Equatable, Sendable {
@@ -137,6 +148,10 @@ public protocol TaskSource: Sendable {
     /// The list new reminders go in, where a reminder leaving the Focus
     /// list goes when its own list is unknown or gone.
     func defaultListId() -> String?
+
+    /// Every list in Reminders, in every account. Empty when Reminders
+    /// can't be read.
+    func reminderLists() -> [ReminderList]
 }
 
 /// Collapses Reminders' inverted 0-9 priority scale (0 = unset) to the

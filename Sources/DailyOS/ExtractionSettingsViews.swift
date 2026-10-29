@@ -38,11 +38,14 @@ struct AdvancedTabView: View {
     let activeModelName: String?
     @Binding var captureHotkeyPreset: CaptureHotkeyPreset
     @Binding var isFocusListEnabled: Bool
+    let focusListTicks: [FocusListTick]
+    let setFocusListTick: (Bool, String) -> Void
+    let refreshFocusListTicks: () async -> Void
 
     var body: some View {
         Form {
             MorningBriefSection(viewModel: morningBriefViewModel)
-            FocusListSection(isEnabled: $isFocusListEnabled)
+            FocusListSection(isEnabled: $isFocusListEnabled, ticks: focusListTicks, setTick: setFocusListTick)
             OpenAtLoginSection(viewModel: openAtLoginViewModel)
             RulesSection(viewModel: rulesViewModel)
             ReExtractionSection(viewModel: viewModel)
@@ -62,6 +65,7 @@ struct AdvancedTabView: View {
             screeningViewModel.refreshStatistics()
             mutedChatsViewModel.refresh()
         }
+        .task { await refreshFocusListTicks() }
         // Pending proposals are never stored (ADR 0038): leaving Advanced
         // discards whatever wasn't approved. A sheet over this tab doesn't
         // count as leaving it.
@@ -135,17 +139,24 @@ private struct MorningBriefSection: View {
 
 /// The Focus list (ADR 0048): a list in Reminders that holds what is in
 /// Focus. Beside the Morning Brief, the other way to see Focus away from
-/// the window.
+/// the window. Under the toggle, a tick for each list it draws from.
 private struct FocusListSection: View {
     @Binding var isEnabled: Bool
+    let ticks: [FocusListTick]
+    let setTick: (Bool, String) -> Void
 
     var body: some View {
         Section {
             Toggle("Keep a Focus list in Reminders", isOn: $isEnabled)
+            ForEach(ticks) { tick in
+                Toggle(tick.list.title, isOn: Binding(get: { tick.isTicked }, set: { setTick($0, tick.id) }))
+                    .toggleStyle(.checkbox)
+            }
+            .disabled(!isEnabled)
         } header: {
             Text("Focus List")
         } footer: {
-            Text("Moves every reminder in Focus into a Reminders list called Focus, and back to its own list when it leaves Focus or is snoozed. Putting a reminder in that list yourself, on your phone or in Reminders, moves it to Focus here. Taking one out moves it to Later, unless its due date keeps it in Focus. Turning this off moves everything back and leaves the list empty.")
+            Text("Moves every reminder in Focus from a ticked list into a Reminders list called Focus, and back to its own list when it leaves Focus or is snoozed. Putting a reminder in that list yourself, on your phone or in Reminders, moves it to Focus here. Taking one out moves it to Later, unless its due date keeps it in Focus. Lists made later start unticked, and the Focus list leaves them alone; moving a reminder into an unticked list takes it out for good. Turning this off moves everything back and leaves the list empty.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

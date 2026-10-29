@@ -107,6 +107,11 @@ final class FakeTaskSource: TaskSource, @unchecked Sendable {
         lists[id] = nil
     }
 
+    /// Stands in for a reminder made on a phone or by another app.
+    func add(_ task: ReminderTask) {
+        tasks.append(task)
+    }
+
     func ensureList(id: String?, title: String) throws -> String {
         if let id, lists[id] != nil { return id }
         if let existing = lists.first(where: { $0.value == title })?.key { return existing }
@@ -118,6 +123,11 @@ final class FakeTaskSource: TaskSource, @unchecked Sendable {
 
     func defaultListId() -> String? {
         defaultList
+    }
+
+    func reminderLists() -> [ReminderList] {
+        guard gateAvailability == .available else { return [] }
+        return lists.map { ReminderList(id: $0.key, title: $0.value) }
     }
 
     func create(_ draft: ReminderDraft) throws -> ReminderTask {

@@ -167,6 +167,10 @@ public final class EventKitTaskSource: TaskSource, @unchecked Sendable {
         store.defaultCalendarForNewReminders()?.calendarIdentifier
     }
 
+    public func reminderLists() -> [ReminderList] {
+        store.calendars(for: .reminder).map { ReminderList(id: $0.calendarIdentifier, title: $0.title) }
+    }
+
     private func fetchReminder(id: String) throws -> EKReminder {
         guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
             throw TaskSourceError.taskNotFound(id: id)

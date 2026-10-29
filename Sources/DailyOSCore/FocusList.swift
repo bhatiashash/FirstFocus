@@ -17,14 +17,29 @@ public struct FocusListPlacement: Equatable, Hashable, Sendable {
     }
 }
 
+/// A Reminders list in Advanced, and whether the Focus list draws from it.
+public struct FocusListTick: Equatable, Sendable, Identifiable {
+    public let list: ReminderList
+    public let isTicked: Bool
+
+    public var id: String { list.id }
+
+    public init(list: ReminderList, isTicked: Bool) {
+        self.list = list
+        self.isTicked = isTicked
+    }
+}
+
 /// Keeps the Focus list in Reminders in line with the Focus Tier
 /// (ADR 0048). Told each time the Ranked List is derived, it syncs one
 /// sync at a time, and calls `onChange` once a sync has changed the
 /// Signal Board.
 ///
 /// Every sync works toward a target. With the setting on, the Focus list
-/// holds every open reminder in the Focus Tier that isn't Snoozed, judged
-/// at the moment the list was ranked against. With it off, the Focus list
+/// holds every open reminder in the Focus Tier that isn't Snoozed and whose
+/// own list is ticked, judged at the moment the list was ranked against.
+/// Lists that exist at the first sync are ticked; one made after that
+/// starts unticked, so the Focus list leaves it alone. With it off, the Focus list
 /// holds nothing. A move you made in Reminders since the last sync counts
 /// first: putting a reminder in is Move to Focus, taking it out is Move to
 /// Later.
@@ -55,6 +70,8 @@ public final class FocusList {
     private var running: Task<Void, Never>?
     /// The fetch each reminder's last failed write was planned from.
     private var failedAt: [String: Int] = [:]
+    /// The lists `lists()` last returned.
+    private var shownListIds: Set<String> = []
 
     public init(taskSource: any TaskSource, store: any FocusListStore, board: SignalBoard, preference: FocusListPreference) {
         self.taskSource = taskSource
@@ -72,6 +89,36 @@ public final class FocusList {
             preference.isEnabled = newValue
             if let lastMoment { requestSync(at: lastMoment) }
         }
+    }
+
+    /// Every Reminders list but the Focus list, by title, and whether the
+    /// Focus list draws from it. Before the first sync every list reads as
+    /// ticked, since that sync ticks them; after it, a list it hasn't seen
+    /// yet reads as unticked.
+    public func lists() async -> [FocusListTick] {
+        let taskSource = self.taskSource
+        let lists = await Task.detached { taskSource.reminderLists() }.value
+            .filter { $0.id != preference.listId }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        shownListIds = Set(lists.map(\.id))
+        let ticked = preference.seenListIds == nil ? shownListIds : preference.tickedListIds
+        return lists.map { FocusListTick(list: $0, isTicked: ticked.contains($0.id)) }
+    }
+
+    /// Ticks or unticks a list, then asks for a sync, which moves its
+    /// reminders in or sends them back.
+    public func setTicked(_ isTicked: Bool, listId: String) {
+        if preference.seenListIds == nil {
+            // Before the first sync: the lists shown were all ticked.
+            preference.seenListIds = shownListIds
+            preference.tickedListIds = shownListIds
+        }
+        if isTicked {
+            preference.tickedListIds.insert(listId)
+        } else {
+            preference.tickedListIds.remove(listId)
+        }
+        if let lastMoment { requestSync(at: lastMoment) }
     }
 
     /// The Ranked List was derived at `moment`.
@@ -106,6 +153,7 @@ public final class FocusList {
         let stored = placements
 
         let listId: String
+        var unticked: Set<String> = []
         if isEnabled {
             let taskSource = self.taskSource
             let knownId = preference.listId
@@ -118,6 +166,11 @@ public final class FocusList {
                 placements = []
             }
             listId = ensured
+            // The Focus list itself is one of them, so none means they
+            // couldn't be read.
+            let lists = await Task.detached { taskSource.reminderLists() }.value
+            guard !lists.isEmpty else { return false }
+            unticked = recordLists(lists, focusListId: listId)
         } else if let known = preference.listId {
             listId = known
         } else {
@@ -127,7 +180,7 @@ public final class FocusList {
         guard let snapshot = board.reminderSnapshot() else { return false }
 
         let steps = isEnabled
-            ? planFilling(snapshot, focusListId: listId, placements: placements, now: moment)
+            ? planFilling(snapshot, focusListId: listId, placements: placements, unticked: unticked, now: moment)
             : planEmptying(snapshot, focusListId: listId, placements: placements)
         let before = Dictionary(placements.map { ($0.reminderId, $0) }, uniquingKeysWith: { first, _ in first })
         var kept: [FocusListPlacement] = []
@@ -167,6 +220,17 @@ public final class FocusList {
         let wrote = toRun.contains { !failed.contains($0.reminderId) && $0.writesReminders }
         if wrote { await board.refreshReminders() }
         return wrote || toRun.contains { $0.unsnooze }
+    }
+
+    /// Records the lists Reminders has now and returns the unticked ones.
+    /// The first time, every list is ticked; after that a list not seen
+    /// before starts unticked, and one that is gone is forgotten.
+    private func recordLists(_ lists: [ReminderList], focusListId: String) -> Set<String> {
+        let ids = Set(lists.map(\.id)).subtracting([focusListId])
+        let ticked = preference.seenListIds == nil ? ids : preference.tickedListIds.intersection(ids)
+        preference.seenListIds = ids
+        preference.tickedListIds = ticked
+        return ids.subtracting(ticked)
     }
 }
 
@@ -208,8 +272,14 @@ private enum FocusListMove: Sendable {
 ///
 /// A reminder checked off today that is still in the list goes back to
 /// its own. One whose list is unknown is left alone.
+///
+/// Only ticked lists are drawn from. A reminder whose own list is
+/// unticked is never moved in and never has its Priority written: one in
+/// the Focus list goes back to it, and one you took out into it is
+/// forgotten, whatever its due date.
 private func planFilling(
-    _ snapshot: ReminderSnapshot, focusListId: String, placements: [FocusListPlacement], now: Date
+    _ snapshot: ReminderSnapshot, focusListId: String, placements: [FocusListPlacement], unticked: Set<String>,
+    now: Date
 ) -> [FocusListStep] {
     let placed = Dictionary(placements.map { ($0.reminderId, $0) }, uniquingKeysWith: { first, _ in first })
     var steps: [FocusListStep] = []
@@ -227,6 +297,14 @@ private func planFilling(
         let isInList = listId == focusListId
         var signal = original
         var home = placed[id]?.homeListId
+
+        if let ownList = isInList ? home : listId, unticked.contains(ownList) {
+            // An unticked list's reminders are left alone. One you moved
+            // into it is forgotten, and one still in the list goes back.
+            if isInList { step.move = .home(ownList) }
+            steps.append(step)
+            continue
+        }
 
         if isInList, placed[id] == nil {
             if isSnoozed(signal, now: now) {
@@ -326,6 +404,8 @@ public struct FocusListPreference: @unchecked Sendable {
     private enum Key {
         static let enabled = "focusListEnabled"
         static let listId = "focusListId"
+        static let seenListIds = "focusListSeenListIds"
+        static let tickedListIds = "focusListTickedListIds"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -342,5 +422,19 @@ public struct FocusListPreference: @unchecked Sendable {
     public var listId: String? {
         get { defaults.string(forKey: Key.listId) }
         nonmutating set { defaults.set(newValue, forKey: Key.listId) }
+    }
+
+    /// Every Reminders list a sync has seen, other than the Focus list.
+    /// `nil` before the first sync with the setting on, which ticks every
+    /// list it sees; a list seen after that starts unticked.
+    public var seenListIds: Set<String>? {
+        get { (defaults.stringArray(forKey: Key.seenListIds)).map(Set.init) }
+        nonmutating set { defaults.set(newValue.map { $0.sorted() }, forKey: Key.seenListIds) }
+    }
+
+    /// The lists the Focus list draws from.
+    public var tickedListIds: Set<String> {
+        get { Set(defaults.stringArray(forKey: Key.tickedListIds) ?? []) }
+        nonmutating set { defaults.set(newValue.sorted(), forKey: Key.tickedListIds) }
     }
 }

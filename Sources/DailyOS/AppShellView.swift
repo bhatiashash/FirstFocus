@@ -349,7 +349,9 @@ struct AppShellView: View {
                 morningBriefViewModel: morningBriefViewModel, openAtLoginViewModel: openAtLoginViewModel,
                 viewModel: settingsViewModel, screeningViewModel: screeningViewModel, rulesViewModel: rulesViewModel,
                 mutedChatsViewModel: mutedChatsViewModel, activeModelName: model.activeModelDisplayName, captureHotkeyPreset: $model.captureHotkeyPreset,
-                isFocusListEnabled: $model.isFocusListEnabled
+                isFocusListEnabled: $model.isFocusListEnabled, focusListTicks: model.focusListTicks,
+                setFocusListTick: { model.setFocusListTick($0, listId: $1) },
+                refreshFocusListTicks: { await model.refreshFocusListTicks() }
             )
         case .about:
             AboutTabView(captureHotkeyPreset: model.captureHotkeyPreset)
