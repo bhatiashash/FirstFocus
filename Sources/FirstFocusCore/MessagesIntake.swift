@@ -73,6 +73,9 @@ public final class MessagesIntake {
     private let auditRoll: @Sendable () -> Double
     /// Advanced's Ignore Filtered SMS toggle, read for each Batch.
     private let ignoresFilteredSMS: @Sendable () -> Bool
+    /// The moment a pass starts and the floor for non-self messages are
+    /// read from here, not from `Date()`, so a test can fix them.
+    private let clock: @MainActor () -> Date
 
     /// Called when a Batch a pass left open is due to close (batched-
     /// extraction ticket 05). The caller answers with a Messages refresh
@@ -91,7 +94,8 @@ public final class MessagesIntake {
         extractor: (any IntentExtractor)? = nil,
         batchWakeAlarm: (any Alarm)? = nil,
         auditRoll: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) },
-        ignoresFilteredSMS: @escaping @Sendable () -> Bool = { false }
+        ignoresFilteredSMS: @escaping @Sendable () -> Bool = { false },
+        clock: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.messagesSource = messagesSource
         self.signalStore = signalStore
@@ -104,6 +108,7 @@ public final class MessagesIntake {
         self.batchWakeAlarm = batchWakeAlarm
         self.auditRoll = auditRoll
         self.ignoresFilteredSMS = ignoresFilteredSMS
+        self.clock = clock
     }
 
     /// `nil` until the model finishes loading, same as `extractor` itself
@@ -162,50 +167,25 @@ public final class MessagesIntake {
         return true
     }
 
-    /// The one pass currently running, if any, whichever kind it is (ADR
-    /// 0034). Intake is not re-entrant: `runIntakePass` only marks a message Processed
-    /// *after* its model call returns, so two passes overlapping both see
-    /// the same message as unprocessed and both run the model on it. On
-    /// this machine a call costs ~10s and the chat.db poll fires every 60s,
-    /// so a pass that outlives one poll interval picks up a second
-    /// concurrent pass, then a third, each multiplying the duplicated work
-    /// until nothing finishes at all — the launch pass included, which is
-    /// what left the window on "Loading…" indefinitely.
-    ///
-    /// `refresh` and `reExtract` share this one slot rather than guarding
-    /// themselves separately, because the resource they contend for is the
-    /// same either way: ADR 0026 keeps a single `llama_context` alive for
-    /// the app's lifetime, so there is exactly one `decodeLock` and two
-    /// passes can only ever queue behind it, never run in parallel.
-    ///
-    /// Cleared by the pass itself, as the last thing it does, rather than
-    /// by whoever started it. A caller's `defer` looked equivalent and
-    /// deadlocked: `reExtract` waits by awaiting this task, and an awaiter
-    /// of an already-finished task resumes without suspending, so it could
-    /// re-read a slot the starter had not been scheduled to clear yet and
-    /// spin on it forever without ever yielding the main actor. Clearing
-    /// inside the body happens once, before any awaiter resumes, which is
-    /// the ordering the wait actually depends on.
-    private var inFlightPass: Task<Result, Never>?
+    /// The slot passes take turns in (ADR 0034): one pass runs at a time,
+    /// whichever kind, and `PassSlot` holds the joining, waiting and
+    /// follow-up rules.
+    private let slot = PassSlot<Result>()
 
-    /// Which kind of pass holds the slot, or `nil` when none does. A
-    /// follow-up pass is automatic whichever kind it follows. Set and
-    /// cleared only by the pass itself.
-    public private(set) var runningPass: PassKind? {
-        didSet { if runningPass != oldValue { onPassChange?(runningPass) } }
-    }
+    /// Which kind of pass holds the slot, or `nil` when none does.
+    public var runningPass: PassKind? { slot.runningPass }
+
+    /// Whether a re-extraction has been asked for and has not ended,
+    /// including while it waits behind another pass.
+    public var isReExtracting: Bool { slot.isReExtracting }
 
     /// Called whenever `runningPass` changes, on the main actor. The same
     /// shape as `onBatchDue`: FirstFocusCore has no Observation, so a caller
     /// that shows the running pass mirrors it from here.
-    public var onPassChange: (@MainActor (PassKind?) -> Void)?
-
-    /// Set when a `refresh` joins a running pass (ADR 0034 amendment): that
-    /// caller was triggered by something the running pass may already have
-    /// listed past, so the pass runs once more before it ends. Holds the
-    /// latest joiner's `now`. However many joiners arrive, it's one flag,
-    /// so they earn one follow-up between them. `reExtract` never sets it.
-    private var followUpNow: Date?
+    public var onPassChange: (@MainActor (PassKind?) -> Void)? {
+        get { slot.onPassChange }
+        set { slot.onPassChange = newValue }
+    }
 
     /// The intake pass: read, garbage collect, and (if a model is loaded)
     /// extract. `now` bounds `withinExtractionWindow` — the first-run
@@ -281,48 +261,25 @@ public final class MessagesIntake {
         }
     }
 
-    /// The pass slot (ADR 0034), the only place `inFlightPass` and
-    /// `runningPass` are taken or cleared. An automatic call arriving while
-    /// any pass runs joins it and earns one follow-up; any other call waits
-    /// the running pass out and then runs its own. The wait loops rather than checking once because
-    /// the slot can be taken again by whoever was waiting alongside it.
+    /// Runs `request` in the slot. A joiner that arrives mid-pass earns a
+    /// follow-up automatic pass at its own moment, so a message that arrived
+    /// after the running pass listed chat.db is picked up as soon as that
+    /// pass ends, not on the next poll. A second re-extraction while one is
+    /// running or waiting does nothing.
     private func runInSlot(
         _ request: PassRequest, priority: TaskPriority,
         onProgress: @escaping @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> Result {
-        if case .automatic(let now) = request, let inFlightPass {
-            followUpNow = now
-            return await inFlightPass.value
-        }
-        while let running = inFlightPass {
-            _ = await running.value
-        }
-        let pass = Task { @MainActor in
-            defer {
-                self.runningPass = nil
-                self.inFlightPass = nil
-            }
-            let result = await self.run(request, priority: priority, onProgress: onProgress)
-            return await self.runFollowUps(after: result, priority: priority)
-        }
-        inFlightPass = pass
-        runningPass = request.kind
-        return await pass.value
-    }
-
-    /// Runs a refresh pass for as long as `followUpNow` keeps getting set,
-    /// inside the pass's own task, so the slot stays held and nobody starts
-    /// a parallel pass in between. A joiner waits for the follow-up too and
-    /// gets its result, which is the fresher answer. The follow-up reports
-    /// no progress: only the starter's `onProgress` ever fires.
-    private func runFollowUps(after result: Result, priority: TaskPriority) async -> Result {
-        var latest = result
-        while let now = followUpNow {
-            followUpNow = nil
-            runningPass = .automatic
-            latest = await run(.automatic(now: now), priority: priority, onProgress: { _, _ in })
-        }
-        return latest
+        var moment: Date?
+        if case .automatic(let now) = request { moment = now }
+        let result = await slot.run(
+            request.kind, at: moment,
+            body: { await self.run(request, priority: priority, onProgress: onProgress) },
+            // The follow-up reports no progress: only the starter's
+            // `onProgress` ever fires.
+            followUp: { now in await self.run(.automatic(now: now), priority: priority, onProgress: { _, _ in }) }
+        )
+        return result ?? .notRead
     }
 
     /// One pass of any kind. Every kind reads Messages the same way and
@@ -334,7 +291,7 @@ public final class MessagesIntake {
         _ request: PassRequest, priority: TaskPriority,
         onProgress: @escaping @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> Result {
-        let passStartedAt = Date()
+        let passStartedAt = clock()
         let rules = request.kind.rules
         if request.kind != .automatic, deps == nil { return .notRead }
         let source = messagesSource
@@ -343,7 +300,7 @@ public final class MessagesIntake {
         // Re-probed after the real read, not just before it: chat.db has
         // no revocation notification, so a grant pulled by hand mid-read
         // is only ever caught by noticing the next read fail (ticket 10).
-        let (availability, messages) = await Task.detached { readMessages(source: source, store: store) }.value
+        let (availability, messages) = await Task.detached { readMessages(source: source, store: store, now: passStartedAt) }.value
         guard availability == .available else { return .unavailable }
 
         switch request {
@@ -468,13 +425,13 @@ public final class MessagesIntake {
 /// since a Full Disk Access grant pulled mid-read has no notification of
 /// its own (ticket 10).
 private func readMessages(
-    source: any MessagesSource, store: any MessagesIntakeState
+    source: any MessagesSource, store: any MessagesIntakeState, now: Date
 ) -> (availability: SourceAvailability, messages: [ChatMessage]) {
     guard source.availability() == .available else { return (.unavailable, []) }
     for chatId in store.automatedChatIds().intersection(source.selfChatIds()) {
         try? store.unmarkAutomated(chatId: chatId)
     }
-    let nonSelfCutoff = ensureNonSelfMessagesCutoff(store: store)
+    let nonSelfCutoff = ensureNonSelfMessagesCutoff(store: store, now: now)
     let messages = source.listMessages(excludingChatIds: store.automatedChatIds(), nonSelfCutoff: nonSelfCutoff)
     return (source.availability(), messages)
 }
@@ -484,11 +441,10 @@ private func readMessages(
 /// never moved again. A free function so `readMessages` can reach it from
 /// inside a `Task.detached` closure, off the main actor, alongside
 /// the other blocking store I/O there.
-private func ensureNonSelfMessagesCutoff(store: any MessagesIntakeState) -> Date {
+private func ensureNonSelfMessagesCutoff(store: any MessagesIntakeState, now: Date) -> Date {
     if let existing = store.nonSelfMessagesCutoff() {
         return existing
     }
-    let now = Date()
     try? store.recordNonSelfMessagesCutoff(now)
     return now
 }

@@ -36,9 +36,6 @@ public final class IntakeRunner {
     /// A signing identity that changed since the last launch (ticket 10):
     /// Messages reads as Unavailable until a pass reads it for itself.
     private var hasIdentityMismatch = false
-    /// From a re-extraction's click until it ends, including while it waits
-    /// behind another pass, so a second click starts nothing.
-    private var isReExtracting = false
 
     public init(
         intake: MessagesIntake, board: SignalBoard, extraction: ExtractionHost, reExtractionSettings: ReExtractionSettings,
@@ -82,9 +79,7 @@ public final class IntakeRunner {
     /// Manual re-extraction (ADR 0004), at `.utility`: someone clicked and
     /// watches its progress. The cooldown counts from when it starts.
     public func reExtract() async {
-        guard !isReExtracting else { return }
-        isReExtracting = true
-        defer { isReExtracting = false }
+        guard !intake.isReExtracting else { return }
         reExtractionSettings.lastRunAt = now()
         let result = await intake.reExtract(
             now: now(), lookbackDays: reExtractionSettings.lookbackDays, priority: .utility
@@ -105,7 +100,7 @@ public final class IntakeRunner {
     /// loading state, which its caller adds. A running pass would only make
     /// the click wait (ADR 0034), so it reads as unavailable instead.
     public var canReExtract: Bool {
-        !isReExtracting && reExtractionProgress == nil && backfillProgress == nil && runningPass == nil
+        !intake.isReExtracting && reExtractionProgress == nil && backfillProgress == nil && runningPass == nil
             && !messagesUnavailable && !extraction.isUnavailable
             && reExtractionAllowed(
                 now: now(), lastRunAt: reExtractionSettings.lastRunAt,

@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Queueing, joining and the follow-up pass are tested without Messages or model fakes.
-- [ ] No pass reads the wall clock directly; the passes that did use the injected clock.
-- [ ] The re-extraction double-click guard and the slot guard live in one place.
-- [ ] Existing pass tests still pass.
+- [x] Queueing, joining and the follow-up pass are tested without Messages or model fakes.
+- [x] No pass reads the wall clock directly; the passes that did use the injected clock.
+- [x] The re-extraction double-click guard and the slot guard live in one place.
+- [x] Existing pass tests still pass.

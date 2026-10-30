@@ -257,7 +257,8 @@ public final class AppModel: ObservableObject {
             participantLabelStore: dependencies.participantLabelStore, historyStore: dependencies.historyStore,
             correctionStore: dependencies.correctionStore,
             batchWakeAlarm: dependencies.batchWakeAlarm, auditRoll: dependencies.auditRoll,
-            ignoresFilteredSMS: { filteredSMSSettings.ignoresFilteredSMS }
+            ignoresFilteredSMS: { filteredSMSSettings.ignoresFilteredSMS },
+            clock: dependencies.now
         )
         let snoozes = Snoozes(store: dependencies.signalStore, alarm: dependencies.snoozeWakeAlarm, now: dependencies.now)
         self.snoozes = snoozes
