@@ -164,15 +164,13 @@ public final class SignalBoard {
 
         let suggested = suggestedTasksInbox(combined)
         let notSuggested = combined.filter { !isSuggestion($0) }
-        let ranked = rank(notSuggested, now: now)
-        let focus = ranked.filter { tier(for: $0, now: now) == .focus }
-        let later = ranked.filter { tier(for: $0, now: now) == .later }
+        let tiers = tierSignals(notSuggested, now: now)
         let snoozed = notSuggested
             .filter { isSnoozed($0, now: now) }
             .sorted { ($0.snoozedUntil!, $0.label) < ($1.snoozedUntil!, $1.label) }
-        let laterCount = deduplicateByLabel(notSuggested.filter { !isSnoozed($0, now: now) })
-            .filter { tier(for: $0, now: now) == .later }
-            .count
+        let focus = tiers.focus
+        let later = tiers.later
+        let laterCount = tiers.allLater.count
         return RankedList(focus: focus, later: later, suggested: suggested, snoozed: snoozed, laterCount: laterCount)
     }
 

@@ -56,7 +56,7 @@ func registerSignalBoardWriteTests(_ runner: TestRunner) {
         }
 
         r.run("deleting a reminder that is already gone reports failure and still refetches") {
-            let (board, taskSource) = await MainActor.run { makeBoard([reminder("a"), reminder("b")]) }
+            let (board, taskSource) = await MainActor.run { makeBoard([reminder("a", title: "Call the dentist"), reminder("b", title: "Buy milk")]) }
             await board.refreshReminders()
             let signal = try await MainActor.run { try require(board.rankedList(now: Date()).later.first { $0.id == "a" }) }
             try taskSource.delete(id: "a")

@@ -159,19 +159,41 @@ public func isSnoozed(_ signal: Signal, now: Date) -> Bool {
     return snoozedUntil > now
 }
 
-/// Pure: no clock of its own, no Source. Tiers sorted within each, not a
-/// weighted sum (ADR 0002). Provenance never enters ordering. Excludes
-/// anything currently snoozed before deduplication or tiering ever sees it,
-/// then deduplicates by label, then caps the result at `maxRankedSignals` —
-/// but only by trimming Later; every Focus signal always survives.
-public func rank(_ signals: [Signal], now: Date) -> [Signal] {
+/// The Signals that compete for the list, split by Tier and sorted within
+/// each, before Later is capped. The one place that decides what is
+/// snoozed out, what is a duplicate and which Tier a Signal falls in, so
+/// the list and the Later count the Morning Brief reports agree.
+public struct TieredSignals: Sendable {
+    public let focus: [Signal]
+    /// Every Later Signal, sorted, whatever the cap leaves.
+    public let allLater: [Signal]
+
+    /// Later as the list shows it: Focus is never cut, so Later keeps
+    /// whatever room `maxRankedSignals` leaves.
+    public var later: [Signal] {
+        Array(allLater.prefix(max(0, maxRankedSignals - focus.count)))
+    }
+}
+
+/// Excludes anything currently snoozed before deduplication or tiering
+/// ever sees it, deduplicates by label, then splits by Tier. Pure: no
+/// clock of its own, no Source. Tiers are sorted within each, not combined
+/// into a weighted sum (ADR 0002). Provenance never enters ordering.
+public func tierSignals(_ signals: [Signal], now: Date) -> TieredSignals {
     let visible = signals.filter { !isSnoozed($0, now: now) }
     let deduplicated = deduplicateByLabel(visible)
     let byTier = Dictionary(grouping: deduplicated) { tier(for: $0, now: now) }
-    let focus = (byTier[.focus] ?? []).sorted { focusOrdersBefore($0, $1, now: now) }
-    let later = (byTier[.later] ?? []).sorted { laterOrdersBefore($0, $1, now: now) }
-    let laterCapacity = max(0, maxRankedSignals - focus.count)
-    return focus + Array(later.prefix(laterCapacity))
+    return TieredSignals(
+        focus: (byTier[.focus] ?? []).sorted { focusOrdersBefore($0, $1, now: now) },
+        allLater: (byTier[.later] ?? []).sorted { laterOrdersBefore($0, $1, now: now) }
+    )
+}
+
+/// The list: all of Focus, then Later capped at `maxRankedSignals` in
+/// total. The cap trims only Later; every Focus signal always survives.
+public func rank(_ signals: [Signal], now: Date) -> [Signal] {
+    let tiers = tierSignals(signals, now: now)
+    return tiers.focus + tiers.later
 }
 
 /// Collapses Signals that share a label, once case, punctuation, and
