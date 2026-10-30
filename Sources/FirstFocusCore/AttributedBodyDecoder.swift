@@ -74,14 +74,20 @@ private func lastClassMarkerEnd(in bytes: [UInt8]) -> Int? {
     return bestEnd
 }
 
+/// Scans backward from the end without allocating, so a blob costs one
+/// pass over its bytes. This runs for every message with a null `text` in
+/// every chat on every Messages pass; building an `Array` slice at each
+/// position made a large chat.db take minutes.
 private func lastRange(of pattern: [UInt8], in bytes: [UInt8]) -> Range<Int>? {
-    guard !pattern.isEmpty, bytes.count >= pattern.count else { return nil }
-    var searchIndex = bytes.count - pattern.count
-    while searchIndex >= 0 {
-        if Array(bytes[searchIndex..<(searchIndex + pattern.count)]) == pattern {
-            return searchIndex..<(searchIndex + pattern.count)
+    guard let first = pattern.first, bytes.count >= pattern.count else { return nil }
+    var start = bytes.count - pattern.count
+    while start >= 0 {
+        if bytes[start] == first {
+            var offset = 1
+            while offset < pattern.count, bytes[start + offset] == pattern[offset] { offset += 1 }
+            if offset == pattern.count { return start..<(start + pattern.count) }
         }
-        searchIndex -= 1
+        start -= 1
     }
     return nil
 }
