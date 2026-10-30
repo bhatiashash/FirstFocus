@@ -6,13 +6,29 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG="${1:-debug}"
+# Settings live in ~/FirstFocus-data/firstfocus.env. A copy made before the
+# rename to FirstFocus lives in ~/DailyOS-data/dailyos.env and is read if the
+# new one is missing.
 ENV_FILE="$HOME/FirstFocus-data/firstfocus.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="$HOME/DailyOS-data/dailyos.env"
 
+# The signing certificate: CERT_NAME in the environment, then in the env
+# file, then "FirstFocus Local Dev" if the keychain has it, then the
+# "DailyOS Local Dev" it had before the rename.
 CERT_NAME="${CERT_NAME:-}"
 if [[ -z "$CERT_NAME" && -f "$ENV_FILE" ]]; then
     CERT_NAME=$(grep -E '^CERT_NAME=' "$ENV_FILE" | tail -n1 | cut -d= -f2-)
 fi
-CERT_NAME="${CERT_NAME:-FirstFocus Local Dev}"
+if [[ -z "$CERT_NAME" ]]; then
+    IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null || true)
+    if grep -q '"FirstFocus Local Dev"' <<<"$IDENTITIES"; then
+        CERT_NAME="FirstFocus Local Dev"
+    elif grep -q '"DailyOS Local Dev"' <<<"$IDENTITIES"; then
+        CERT_NAME="DailyOS Local Dev"
+    else
+        CERT_NAME="FirstFocus Local Dev"
+    fi
+fi
 
 echo "Building FirstFocus ($CONFIG)..."
 swift build -c "$CONFIG"

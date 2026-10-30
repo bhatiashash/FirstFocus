@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A build with no environment variables set signs with the certificate that exists.
-- [ ] The build script and the release script comments name the files and certificate that are in use.
-- [ ] A signed release build succeeds.
+- [x] A build with no environment variables set signs with the certificate that exists.
+- [x] The build script and the release script comments name the files and certificate that are in use.
+- [x] A signed release build succeeds.

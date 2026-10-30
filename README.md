@@ -93,7 +93,7 @@ CERT_NAME=- ./build.sh          # "-" signs ad hoc
 swift run FirstFocusTestRunner
 ```
 
-`build.sh` signs with a certificate named in `CERT_NAME`. Signing ad hoc (`-`) works, but macOS treats every rebuild as a new app, so you will need to grant Full Disk Access again after each build. A self-signed certificate in your login keychain avoids that.
+`build.sh` signs with the certificate named in `CERT_NAME`, in the environment or in `~/FirstFocus-data/firstfocus.env`. With neither, it uses `FirstFocus Local Dev` from your keychain, or `DailyOS Local Dev` if that is the one you have. Signing ad hoc (`-`) works, but macOS treats every rebuild as a new app, so you will need to grant Full Disk Access again after each build. A self-signed certificate in your login keychain avoids that.
 
 The tests use a small runner of their own (`Sources/FirstFocusTestRunner`) instead of XCTest, so they run with only the Command Line Tools installed.
 
