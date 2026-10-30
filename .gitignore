@@ -3,3 +3,8 @@
 .DS_Store
 *.xcodeproj
 .claude/
+
+# Local agent setup and tickets, kept on this machine only
+.scratch/
+AGENTS.md
+CLAUDE.md
