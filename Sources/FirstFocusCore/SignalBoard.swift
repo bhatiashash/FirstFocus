@@ -221,6 +221,24 @@ public final class SignalBoard {
         }
     }
 
+    // MARK: - Writing to Reminders
+
+    /// Runs `work` against the task source off the main thread. Returns what
+    /// it returned, or `nil` when it threw: the write didn't land.
+    private func write<T: Sendable>(_ work: @escaping @Sendable (any TaskSource) throws -> T) async -> T? {
+        let taskSource = self.taskSource
+        return await Task.detached { try? work(taskSource) }.value
+    }
+
+    /// The one way a verb changes a reminder: `write`, then a re-fetch, so
+    /// the Board shows what Reminders itself now reports whether the write
+    /// landed or not.
+    private func writeAndRefetch<T: Sendable>(_ work: @escaping @Sendable (any TaskSource) throws -> T) async -> T? {
+        let result = await write(work)
+        await refreshReminders()
+        return result
+    }
+
     // MARK: - Verbs
 
     /// Messages Signals only: Dismiss means "Extraction produced a false
@@ -272,14 +290,17 @@ public final class SignalBoard {
         rereadMessages()
     }
 
-    public func promote(_ signal: Signal) async {
+    /// Returns whether the write landed.
+    @discardableResult
+    public func promote(_ signal: Signal) async -> Bool {
         await setPriority(on: signal, priority: .high) { [signalStore] in
             try? signalStore.promote(signalId: $0)
         }
     }
 
     /// One-click demotion: the reverse of `promote`.
-    public func demote(_ signal: Signal) async {
+    @discardableResult
+    public func demote(_ signal: Signal) async -> Bool {
         await setPriority(on: signal, priority: .none) { [signalStore] in
             try? signalStore.demote(signalId: $0)
         }
@@ -292,17 +313,16 @@ public final class SignalBoard {
     /// store write's error the same way `checkOff` does for this Source.
     private func setPriority(
         on signal: Signal, priority: Priority, writeLocally: (String) -> Void
-    ) async {
+    ) async -> Bool {
         switch signal.source {
         case .reminders:
-            let taskSource = self.taskSource
             let id = signal.sourceRef
-            await Task.detached { try? taskSource.update(id: id, .priority(priority)) }.value
-            await refreshReminders()
+            return await writeAndRefetch { try $0.update(id: id, .priority(priority)) } != nil
         case .messages:
-            guard messageSignals.contains(where: { $0.id == signal.id }) else { return }
+            guard messageSignals.contains(where: { $0.id == signal.id }) else { return false }
             writeLocally(signal.id)
             rereadMessages()
+            return true
         }
     }
 
@@ -328,10 +348,8 @@ public final class SignalBoard {
     /// (ADR 0045: Approve & Snooze).
     public func approve(_ signal: Signal, snoozedUntil: Date? = nil) async -> String? {
         guard signal.source == .messages, signal.provenance == .inferred else { return nil }
-        let taskSource = self.taskSource
         let draft = approvedReminderDraft(from: signal)
-        let created: ReminderTask? = await Task.detached { try? taskSource.create(draft) }.value
-        guard let created else { return nil }
+        guard let created = await write({ try $0.create(draft) }) else { return nil }
         try? signalStore.approve(signalId: signal.id, reminderId: created.id)
         if let snoozedUntil { snoozes.snooze(signalId: created.id, until: snoozedUntil, dueAt: created.dueAt) }
         if let sender = signal.sender, isResolvedSenderName(sender) {
@@ -346,8 +364,7 @@ public final class SignalBoard {
     /// the id Approve returned, whatever became of it since (already gone
     /// is fine), forgets its Sender, and puts the Signal back to open.
     public func unapprove(signalId: String, reminderId: String) async {
-        let taskSource = self.taskSource
-        await Task.detached { try? taskSource.delete(id: reminderId) }.value
+        await write { try $0.delete(id: reminderId) }
         try? signalStore.forgetApprovedSender(reminderId: reminderId)
         snoozes.end(signalId: reminderId)
         try? signalStore.reopen(signalId: signalId)
@@ -365,25 +382,24 @@ public final class SignalBoard {
     public func createTask(title: String, priority: Priority = .none, dueAt: Date? = nil) async -> String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let taskSource = self.taskSource
-        let created = await Task.detached { try? taskSource.create(ReminderDraft(title: trimmed, dueAt: dueAt, priority: priority)) }.value
-        await refreshReminders()
-        return created?.id
+        let draft = ReminderDraft(title: trimmed, dueAt: dueAt, priority: priority)
+        return await writeAndRefetch { try $0.create(draft) }?.id
     }
 
     /// Reminders Signals only. Writes the title, and the due date only when
-    /// the new title carried a date phrase (`dueAt`); nothing else.
-    public func renameTask(_ signal: Signal, to newTitle: String, dueAt: Date? = nil) async {
-        guard signal.source == .reminders else { return }
+    /// the new title carried a date phrase (`dueAt`); nothing else. A title
+    /// that fails to write leaves the due date alone. Returns whether every
+    /// write landed.
+    @discardableResult
+    public func renameTask(_ signal: Signal, to newTitle: String, dueAt: Date? = nil) async -> Bool {
+        guard signal.source == .reminders else { return false }
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let taskSource = self.taskSource
+        guard !trimmed.isEmpty else { return false }
         let id = signal.sourceRef
-        await Task.detached {
-            try? taskSource.update(id: id, .title(trimmed))
-            if let dueAt { try? taskSource.update(id: id, .dueDate(dueAt)) }
-        }.value
-        await refreshReminders()
+        return await writeAndRefetch { (taskSource: any TaskSource) -> Void in
+            try taskSource.update(id: id, .title(trimmed))
+            if let dueAt { try taskSource.update(id: id, .dueDate(dueAt)) }
+        } != nil
     }
 
     /// Reopens a reminder from the Checked Off sheet and re-fetches, so
@@ -391,20 +407,24 @@ public final class SignalBoard {
     /// computed place rather than wherever it was once dragged. Refuses a
     /// recurring reminder: reopening it would fork the recurrence into
     /// duplicate reminders.
-    public func uncheck(_ reminder: CheckedOffReminder) async {
-        guard !reminder.isRecurring else { return }
-        let taskSource = self.taskSource
-        await Task.detached { try? taskSource.reopen(id: reminder.id) }.value
-        try? signalStore.clearFocusOrder(signalId: reminder.id)
-        snoozes.end(signalId: reminder.id)
+    /// Returns whether the reminder was reopened.
+    @discardableResult
+    public func uncheck(_ reminder: CheckedOffReminder) async -> Bool {
+        guard !reminder.isRecurring else { return false }
+        let id = reminder.id
+        let reopened = await write { try $0.reopen(id: id) } != nil
+        try? signalStore.clearFocusOrder(signalId: id)
+        snoozes.end(signalId: id)
         await refreshReminders()
+        return reopened
     }
 
-    public func deleteTask(_ signal: Signal) async {
-        guard signal.source == .reminders else { return }
-        let taskSource = self.taskSource
-        await Task.detached { try? taskSource.delete(id: signal.sourceRef) }.value
-        await refreshReminders()
+    /// Returns whether the reminder was deleted.
+    @discardableResult
+    public func deleteTask(_ signal: Signal) async -> Bool {
+        guard signal.source == .reminders else { return false }
+        let id = signal.sourceRef
+        return await writeAndRefetch { try $0.delete(id: id) } != nil
     }
 }
 
