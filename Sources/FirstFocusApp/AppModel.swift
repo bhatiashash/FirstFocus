@@ -84,8 +84,12 @@ public final class AppModel: ObservableObject {
     /// The Undo bar's offer (CONTEXT.md: Undo bar), or `nil` when the bar
     /// is hidden. A mirror of `verbs.currentOffer` for SwiftUI's sake.
     @Published public private(set) var undoOffer: UndoOffer?
+    @Published public private(set) var failures: [AppFailure] = []
+    @Published public private(set) var focusListFailure: FocusListFailure?
+    private var dismissedFocusFailure: FocusListFailure?
     /// Every verb that writes Signal state, with its Undo (signal-verbs).
     private let verbs: SignalVerbs
+    private let feedback: BatchFeedback?
     /// Owned here rather than as `ContentView` local `@State` because the
     /// trailing-edge toolbar buttons are hosted in a separate view
     /// hierarchy (their own `NSToolbarItem`, not a `ContentView`
@@ -253,9 +257,12 @@ public final class AppModel: ObservableObject {
             switch $0 {
             case .board: self?.boardChanged()
             case .history: self?.updateNotForMeOffers()
+            case .failure: break
             }
+            self?.publishFailures()
         },
         board: board, intakeRunner: intakeRunner, extraction: extraction, historyStore: historyStore, signalStore: signalStore, corrections: corrections,
+        feedback: feedback,
         screeningSettings: screeningSettings
     )
     /// Screening (ADR 0036): the preferences, the Keychain-backed key, and
@@ -276,6 +283,7 @@ public final class AppModel: ObservableObject {
     /// executable passes `AppDependencies.live(...)` and a test passes a
     /// test value, so a test never opens a live store by accident.
     public init(_ dependencies: AppDependencies) {
+        self.feedback = dependencies.batchFeedback
         self.taskSource = dependencies.taskSource
         self.contactsResolver = dependencies.contactsResolver
         let filteredSMSSettings = dependencies.filteredSMSSettings
@@ -359,10 +367,16 @@ public final class AppModel: ObservableObject {
             self.republish()
         }
         self.verbs.notForMe = SignalVerbs.NotForMe(
-            mark: { [weak self] in self?.historyActions.notForMe($0) ?? false },
-            undo: { [weak self] in self?.historyActions.undoNotForMe(of: $0) }
+            mark: { [weak self] suggestion in
+                guard let self, self.historyActions.notForMe(suggestion) else { return nil }
+                return self.historyActions.undoAction(for: suggestion)
+            }
         )
+        self.historyActions.onRetriedInboxFeedback = { [weak self] suggestion, undo in
+            self?.verbs.offerNotForMe(suggestion, undo: undo)
+        }
         self.focusList.onChange = { [weak self] in
+            self?.publishFailures()
             self?.republish()
         }
         self.snoozes.onWake = { [weak self] in
@@ -577,6 +591,38 @@ public final class AppModel: ObservableObject {
         updateNotForMeOffers()
         triage.drop { [presentation] in !presentation.isSuggested($0) }
         focusList.listDerived(at: rankedAt)
+    }
+
+    private func publishFailures() {
+        let focusFailure = focusList.failure
+        if focusListFailure != focusFailure {
+            focusListFailure = focusFailure
+            dismissedFocusFailure = nil
+        }
+        var current = historyActions.failures
+        if let focusFailure, dismissedFocusFailure != focusFailure {
+            let message: String
+            switch focusFailure {
+            case .persistenceRead: message = "Couldn’t read Focus list sync state. Sync will retry after the next refresh."
+            case .persistenceWrite: message = "Couldn’t save Focus list sync state. Sync will retry after the next refresh."
+            case .reminders: message = "Couldn’t update Reminders for the Focus list. Sync will retry after the next refresh."
+            }
+            current.append(AppFailure(id: "focus-list-sync", message: message, canRetry: false))
+        }
+        if failures != current { failures = current }
+    }
+
+    public func retryFailure(_ id: String) {
+        historyActions.retryFailure(id)
+    }
+
+    public func dismissFailure(_ id: String) {
+        if id == "focus-list-sync" {
+            dismissedFocusFailure = focusListFailure
+            publishFailures()
+        } else {
+            historyActions.dismissFailure(id)
+        }
     }
 
     /// Wake from sleep is the other moment a missed Brief can go out. The
@@ -896,4 +942,3 @@ public final class AppModel: ObservableObject {
         await verbs.deleteTask(signal)
     }
 }
-

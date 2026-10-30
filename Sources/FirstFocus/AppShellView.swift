@@ -174,6 +174,24 @@ struct AppShellView: View {
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             destinationView(for: selectedDestination ?? .main)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if !model.failures.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(model.failures) { failure in
+                                HStack(spacing: 12) {
+                                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                                    Text(failure.message).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                                    if failure.canRetry {
+                                        Button("Retry") { model.retryFailure(failure.id) }
+                                    }
+                                    Button("Dismiss") { model.dismissFailure(failure.id) }
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(.regularMaterial)
+                    }
+                }
                 // With the sidebar hidden, its footer can't show progress,
                 // so a small capsule does, top right, while it lasts.
                 .overlay(alignment: .topTrailing) {

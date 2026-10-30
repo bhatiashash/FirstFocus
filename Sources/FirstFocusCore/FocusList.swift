@@ -3,18 +3,39 @@ import Foundation
 /// The Focus list's name in Reminders (CONTEXT.md: Focus list).
 public let focusListTitle = "Focus"
 
-/// A reminder that was in the Focus list when FirstFocus last looked, and
-/// the list it goes back to when it leaves. `homeListId` is `nil` when
+/// A reminder owned by the Focus list, or with a durably prepared move,
+/// and the list it goes back to when it leaves. `homeListId` is `nil` when
 /// that is unknown, for a reminder you put in the Focus list yourself or
 /// made there; it then goes to the default list.
 public struct FocusListPlacement: Equatable, Hashable, Sendable {
     public let reminderId: String
     public let homeListId: String?
+    public let pendingMove: FocusListPendingMove?
 
-    public init(reminderId: String, homeListId: String?) {
+    public init(reminderId: String, homeListId: String?, pendingMove: FocusListPendingMove? = nil) {
         self.reminderId = reminderId
         self.homeListId = homeListId
+        self.pendingMove = pendingMove
     }
+}
+
+/// An intended move, saved before changing Reminders and cleared only
+/// after finalization. Observing its destination recovers a completed app
+/// move; observing its source permits retry without treating it as manual.
+public struct FocusListPendingMove: Equatable, Hashable, Sendable {
+    public let fromListId: String
+    public let toListId: String
+
+    public init(fromListId: String, toListId: String) {
+        self.fromListId = fromListId
+        self.toListId = toListId
+    }
+}
+
+public enum FocusListFailure: Equatable, Sendable {
+    case persistenceRead
+    case persistenceWrite
+    case reminders
 }
 
 /// A Reminders list in Advanced, and whether FirstFocus uses it: an
@@ -48,9 +69,10 @@ public struct FocusListTick: Equatable, Sendable, Identifiable {
 /// first: putting a reminder in is Move to Focus, taking it out is Move to
 /// Later.
 ///
-/// A reminder whose write fails keeps the record it had before the sync,
-/// so the next sync sees your move again, and is tried again only once
-/// Reminders has been fetched again. A sync that wrote anything fetches
+/// A move's home and intended destination are persisted before Reminders
+/// is changed. Pending moves survive a restart or failed finalization.
+/// Failed writes are tried again only once Reminders has been fetched
+/// again. A sync that wrote anything fetches
 /// Reminders before it ends, and the next sync waits for it, so no sync
 /// reads a fetch older than the last write; one that started earlier is
 /// thrown away by the Board. Nothing happens while Reminders is
@@ -64,10 +86,12 @@ public final class FocusList {
     private let snoozes: Snoozes
     private let preference: FocusListPreference
 
-    /// Called after a sync that changed the Board. The caller derives the
+    /// Called after a sync that changed the Board or failure state. The caller derives the
     /// Ranked List again, which asks for another sync; that one finds
     /// nothing to do.
     public var onChange: (() -> Void)?
+    /// Nonblocking sync failure, cleared after a successful retry.
+    public private(set) var failure: FocusListFailure?
 
     /// The moment the next sync judges Tier against, `nil` when none is
     /// waiting. A sync asked for while another waits replaces it.
@@ -76,6 +100,7 @@ public final class FocusList {
     private var running: Task<Void, Never>?
     /// The fetch each reminder's last failed write was planned from.
     private var failedAt: [String: Int] = [:]
+    private var blockedAtFetch: Int?
 
     public init(
         taskSource: any TaskSource, store: any FocusListStore, board: SignalBoard, snoozes: Snoozes,
@@ -163,7 +188,9 @@ public final class FocusList {
         running = Task { [weak self] in
             while let self, let moment = self.pendingMoment {
                 self.pendingMoment = nil
-                if await self.sync(at: moment) { self.onChange?() }
+                let previousFailure = self.failure
+                let changed = await self.sync(at: moment)
+                if changed || previousFailure != self.failure { self.onChange?() }
             }
             self?.running = nil
         }
@@ -173,7 +200,12 @@ public final class FocusList {
     private func sync(at moment: Date) async -> Bool {
         let isEnabled = preference.isEnabled
         guard isEnabled || preference.listId != nil else { return false }
-        guard board.reminderSnapshot() != nil, var placements = store.focusListPlacements() else { return false }
+        guard let initialSnapshot = board.reminderSnapshot(), blockedAtFetch != initialSnapshot.fetch else { return false }
+        guard var placements = store.focusListPlacements() else {
+            failure = .persistenceRead
+            blockedAtFetch = initialSnapshot.fetch
+            return false
+        }
         let stored = placements
 
         let listId: String
@@ -183,7 +215,11 @@ public final class FocusList {
             let knownId = preference.listId
             guard let ensured = await Task.detached(operation: {
                 try? taskSource.ensureList(id: knownId, title: focusListTitle)
-            }).value else { return false }
+            }).value else {
+                failure = .reminders
+                blockedAtFetch = initialSnapshot.fetch
+                return false
+            }
             if ensured != knownId {
                 // A new list, so nothing is in it yet.
                 preference.listId = ensured
@@ -193,7 +229,11 @@ public final class FocusList {
             // The Focus list itself is one of them, so none means they
             // couldn't be read.
             let lists = await Task.detached { taskSource.reminderLists() }.value
-            guard !lists.isEmpty else { return false }
+            guard !lists.isEmpty else {
+                failure = .reminders
+                blockedAtFetch = initialSnapshot.fetch
+                return false
+            }
             unticked = forgetGoneLists(lists)
         } else if let known = preference.listId {
             listId = known
@@ -203,10 +243,22 @@ public final class FocusList {
         // Read after the await, so a fetch that landed meanwhile counts.
         guard let snapshot = board.reminderSnapshot() else { return false }
 
+        placements = placements.compactMap { placement in
+            guard let pending = placement.pendingMove, let current = snapshot.listIds[placement.reminderId] else {
+                return placement
+            }
+            if current == pending.toListId {
+                return current == listId
+                    ? FocusListPlacement(reminderId: placement.reminderId, homeListId: placement.homeListId) : nil
+            }
+            if current == pending.fromListId, pending.toListId == listId { return nil }
+            return FocusListPlacement(reminderId: placement.reminderId, homeListId: placement.homeListId)
+        }
+
         let steps = isEnabled
             ? planFilling(snapshot, focusListId: listId, placements: placements, unticked: unticked, now: moment)
             : planEmptying(snapshot, focusListId: listId, placements: placements)
-        let before = Dictionary(placements.map { ($0.reminderId, $0) }, uniquingKeysWith: { first, _ in first })
+        let before = Dictionary(stored.map { ($0.reminderId, $0) }, uniquingKeysWith: { first, _ in first })
         var kept: [FocusListPlacement] = []
         var toRun: [FocusListStep] = []
         for step in steps {
@@ -219,12 +271,50 @@ public final class FocusList {
             }
         }
         guard !toRun.isEmpty else {
-            if Set(kept) != Set(stored) { try? store.setFocusListPlacements(kept) }
+            if Set(kept) != Set(stored) {
+                guard persist(kept, fetch: snapshot.fetch) else { return false }
+            }
+            if !failedAt.values.contains(snapshot.fetch) { failure = nil }
             return false
         }
 
-        for step in toRun where step.unsnooze { snoozes.end(signalId: step.reminderId) }
         let taskSource = self.taskSource
+        var journal = Dictionary(kept.map { ($0.reminderId, $0) }, uniquingKeysWith: { first, _ in first })
+        var prepared: [FocusListStep] = []
+        for var step in toRun {
+            if let move = step.move, let from = snapshot.listIds[step.reminderId] {
+                let destination = await Task.detached {
+                    switch move {
+                    case .intoFocusList: return Optional(listId)
+                    case .home(let home):
+                        if let home, home != listId, taskSource.reminderLists().contains(where: { $0.id == home }) {
+                            return home
+                        }
+                        return taskSource.defaultListId().flatMap { $0 == listId ? nil : $0 }
+                    }
+                }.value
+                guard let destination else {
+                    failedAt[step.reminderId] = snapshot.fetch
+                    if let previous = before[step.reminderId] {
+                        journal[step.reminderId] = previous
+                        kept.append(previous)
+                    }
+                    continue
+                }
+                if case .home = move { step.move = .home(destination) }
+                journal[step.reminderId] = FocusListPlacement(
+                    reminderId: step.reminderId,
+                    homeListId: step.placement?.homeListId ?? before[step.reminderId]?.homeListId,
+                    pendingMove: FocusListPendingMove(fromListId: from, toListId: destination)
+                )
+            } else if let previous = before[step.reminderId] {
+                journal[step.reminderId] = previous
+            }
+            prepared.append(step)
+        }
+        guard persist(Array(journal.values), fetch: snapshot.fetch) else { return false }
+        toRun = prepared
+        for step in toRun where step.unsnooze { snoozes.end(signalId: step.reminderId) }
         let writes = toRun
         let failed = await Task.detached {
             Set(writes.filter { !run($0, focusListId: listId, taskSource: taskSource) }.map(\.reminderId))
@@ -239,11 +329,30 @@ public final class FocusList {
                 if let placement = step.placement { kept.append(placement) }
             }
         }
-        try? store.setFocusListPlacements(kept)
+        let finalized = persist(kept, fetch: snapshot.fetch)
 
         let wrote = toRun.contains { !failed.contains($0.reminderId) && $0.writesReminders }
         if wrote { await board.refreshReminders() }
+        if let fetch = board.reminderSnapshot()?.fetch {
+            for (id, plannedFetch) in failedAt where plannedFetch == snapshot.fetch { failedAt[id] = fetch }
+            if !finalized { blockedAtFetch = fetch }
+        }
+        if finalized {
+            failure = failedAt.values.contains(board.reminderSnapshot()?.fetch ?? snapshot.fetch) ? .reminders : nil
+        }
         return wrote || toRun.contains { $0.unsnooze }
+    }
+
+    private func persist(_ placements: [FocusListPlacement], fetch: Int) -> Bool {
+        do {
+            try store.setFocusListPlacements(placements)
+            blockedAtFetch = nil
+            return true
+        } catch {
+            failure = .persistenceWrite
+            blockedAtFetch = fetch
+            return false
+        }
     }
 
     /// Forgets unticked lists that no longer exist and returns the rest.
@@ -390,31 +499,11 @@ private func run(_ step: FocusListStep, focusListId: String, taskSource: any Tas
     case .intoFocusList:
         return (try? taskSource.update(id: step.reminderId, .list(focusListId))) != nil
     case .home(let listId):
-        return moveReminderHome(step.reminderId, to: listId, focusListId: focusListId, taskSource: taskSource)
+        guard let listId else { return false }
+        return (try? taskSource.update(id: step.reminderId, .list(listId))) != nil
     case nil:
         return true
     }
-}
-
-/// Moves a reminder out of the Focus list: to `listId`, or to the default
-/// list when that is `nil` or gone. Never into the Focus list itself, so
-/// with the Focus list as the default it stays where it is. Returns
-/// whether it moved.
-private func moveReminderHome(
-    _ reminderId: String, to listId: String?, focusListId: String, taskSource: any TaskSource
-) -> Bool {
-    if let listId, listId != focusListId {
-        do {
-            try taskSource.update(id: reminderId, .list(listId))
-            return true
-        } catch TaskSourceError.listNotFound {
-            // Its own list was deleted: the default list instead.
-        } catch {
-            return false
-        }
-    }
-    guard let fallback = taskSource.defaultListId(), fallback != focusListId else { return false }
-    return (try? taskSource.update(id: reminderId, .list(fallback))) != nil
 }
 
 /// The Focus list's setting and which Reminders list it is, in

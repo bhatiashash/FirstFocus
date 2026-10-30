@@ -10,7 +10,9 @@ import SQLite3
 /// opens and closes its own connection, the same posture the other SQLite
 /// stores in this file already take.
 public final class SQLiteCorrectionStore: CorrectionStore, @unchecked Sendable {
-    private let path: String
+    let path: String
+
+    package var databasePath: String { path }
 
     /// Written with fractional seconds, so a Correction made in the same
     /// second as a Rule proposal's watermark still compares correctly
@@ -63,7 +65,7 @@ public final class SQLiteCorrectionStore: CorrectionStore, @unchecked Sendable {
         }
     }
 
-    private func insert(_ correction: Correction, into db: OpaquePointer) throws {
+    func insert(_ correction: Correction, into db: OpaquePointer) throws {
         let sql = """
         INSERT INTO corrections (chat_id, source_ref, input_text, corrected_output, correction_type, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -102,7 +104,7 @@ public final class SQLiteCorrectionStore: CorrectionStore, @unchecked Sendable {
         return types
     }
 
-    private func execute(_ db: OpaquePointer, _ sql: String, bind: (OpaquePointer) -> Void) throws {
+    func execute(_ db: OpaquePointer, _ sql: String, bind: (OpaquePointer) -> Void) throws {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
@@ -186,7 +188,7 @@ public final class SQLiteCorrectionStore: CorrectionStore, @unchecked Sendable {
         return results
     }
 
-    private func open() -> OpaquePointer? {
+    func open() -> OpaquePointer? {
         SQLite.open(path: path, schema: createSchemaIfNeeded)
     }
 

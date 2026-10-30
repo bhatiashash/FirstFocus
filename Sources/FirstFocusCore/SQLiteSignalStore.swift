@@ -14,6 +14,8 @@ import SQLite3
 public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
     private let path: String
 
+    package var databasePath: String { path }
+
     /// Fresh per access rather than shared state: `ISO8601DateFormatter`
     /// isn't documented safe for concurrent use, and this class's methods
     /// (each opening its own connection) may run on different threads.
@@ -528,15 +530,20 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         guard sqlite3_prepare_v2(
-            db, "SELECT reminder_id, home_list_id FROM focus_list", -1, &statement, nil
+            db, "SELECT reminder_id, home_list_id, pending_from_list_id, pending_to_list_id FROM focus_list", -1, &statement, nil
         ) == SQLITE_OK, let statement else { return nil }
         var results: [FocusListPlacement] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
             if let reminderId = columnText(statement, 0) {
-                results.append(FocusListPlacement(reminderId: reminderId, homeListId: columnText(statement, 1)))
+                let pending = columnText(statement, 2).flatMap { from in
+                    columnText(statement, 3).map { FocusListPendingMove(fromListId: from, toListId: $0) }
+                }
+                results.append(FocusListPlacement(reminderId: reminderId, homeListId: columnText(statement, 1), pendingMove: pending))
             }
+            result = sqlite3_step(statement)
         }
-        return results
+        return result == SQLITE_DONE ? results : nil
     }
 
     public func setFocusListPlacements(_ placements: [FocusListPlacement]) throws {
@@ -546,12 +553,19 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         try SQLite.inTransaction(db, failure: SignalStoreError.writeFailed) {
             try executeIn(db, "DELETE FROM focus_list") { _ in }
             for placement in placements {
-                try executeIn(db, "INSERT OR REPLACE INTO focus_list (reminder_id, home_list_id) VALUES (?, ?)") {
+                try executeIn(db, "INSERT OR REPLACE INTO focus_list (reminder_id, home_list_id, pending_from_list_id, pending_to_list_id) VALUES (?, ?, ?, ?)") {
                     sqlite3_bind_text($0, 1, placement.reminderId, -1, sqliteTransient)
                     if let home = placement.homeListId {
                         sqlite3_bind_text($0, 2, home, -1, sqliteTransient)
                     } else {
                         sqlite3_bind_null($0, 2)
+                    }
+                    if let pending = placement.pendingMove {
+                        sqlite3_bind_text($0, 3, pending.fromListId, -1, sqliteTransient)
+                        sqlite3_bind_text($0, 4, pending.toListId, -1, sqliteTransient)
+                    } else {
+                        sqlite3_bind_null($0, 3)
+                        sqlite3_bind_null($0, 4)
                     }
                 }
             }
@@ -879,7 +893,7 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw SignalStoreError.writeFailed }
     }
 
-    private func open() -> OpaquePointer? {
+    func open() -> OpaquePointer? {
         SQLite.open(path: path, schema: createSchemaIfNeeded)
     }
 
@@ -929,7 +943,9 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         );
         CREATE TABLE IF NOT EXISTS focus_list (
             reminder_id TEXT PRIMARY KEY,
-            home_list_id TEXT
+            home_list_id TEXT,
+            pending_from_list_id TEXT,
+            pending_to_list_id TEXT
         );
         CREATE TABLE IF NOT EXISTS reminder_senders (
             reminder_id TEXT PRIMARY KEY,
@@ -966,6 +982,8 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
             && SQLite.addColumnIfMissing(db, table: "signals", column: "superseded_by", type: "TEXT")
             && SQLite.addColumnIfMissing(db, table: "signals", column: "dismissed_by_not_for_me", type: "INTEGER")
             && SQLite.addColumnIfMissing(db, table: "snoozes", column: "due_at", type: "TEXT")
+            && SQLite.addColumnIfMissing(db, table: "focus_list", column: "pending_from_list_id", type: "TEXT")
+            && SQLite.addColumnIfMissing(db, table: "focus_list", column: "pending_to_list_id", type: "TEXT")
     }
 
     /// A plain `INSERT`, not `INSERT OR REPLACE`: `source_ref`'s primary

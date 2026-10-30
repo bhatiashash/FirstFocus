@@ -12,14 +12,12 @@ import Foundation
 @MainActor
 public final class SignalVerbs {
     /// "Not for me" lives with History, outside Core: marking a Suggestion's
-    /// Batch, and undoing it. `mark` returns whether the Batch offered it.
+    /// Batch, and undoing it. `mark` returns the durable action's Undo.
     public struct NotForMe {
-        public let mark: @MainActor (Signal) -> Bool
-        public let undo: @MainActor (Signal) -> Void
+        public let mark: @MainActor (Signal) -> (@MainActor () -> Void)?
 
-        public init(mark: @escaping @MainActor (Signal) -> Bool, undo: @escaping @MainActor (Signal) -> Void) {
+        public init(mark: @escaping @MainActor (Signal) -> (@MainActor () -> Void)?) {
             self.mark = mark
-            self.undo = undo
         }
     }
 
@@ -134,10 +132,14 @@ public final class SignalVerbs {
     /// The Inbox's thumbs-down: History's "Not for me" on the Suggestion's
     /// Batch. Undo reverses it the way History's Undo does (ADR 0043).
     public func notForMe(_ suggestion: Signal) {
-        guard let notForMe, notForMe.mark(suggestion) else { return }
+        guard let undo = notForMe?.mark(suggestion) else { return }
+        offerNotForMe(suggestion, undo: undo)
+    }
+
+    public func offerNotForMe(_ suggestion: Signal, undo: @escaping @MainActor () -> Void) {
         onChange()
         offer(.notForMe, label: suggestion.label, bringingBack: suggestion.id, .reversible { [weak self] in
-            notForMe.undo(suggestion)
+            undo()
             self?.onChange()
         })
     }

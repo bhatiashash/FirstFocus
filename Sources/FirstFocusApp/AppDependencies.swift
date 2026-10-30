@@ -30,6 +30,11 @@ public struct AppDependencies {
     public var historyStore: any HistoryStore
     public var participantLabelStore: any ParticipantLabelStore
     public var correctionStore: any CorrectionStore
+    var batchFeedback: BatchFeedback? {
+        guard let signals = signalStore as? SQLiteSignalStore, let corrections = correctionStore as? SQLiteCorrectionStore,
+              signals.databasePath == corrections.databasePath else { return nil }
+        return BatchFeedback(path: corrections.databasePath)
+    }
     public var screeningSettings: ScreeningSettings
     public var filteredSMSSettings: FilteredSMSSettings
     public var apiKeyStore: any APIKeyStore

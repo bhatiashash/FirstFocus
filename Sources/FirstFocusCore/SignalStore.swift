@@ -387,7 +387,8 @@ public protocol FocusListStore: Sendable {
     /// list as one you just put there.
     func focusListPlacements() -> [FocusListPlacement]?
 
-    /// Replaces every placement with `placements`.
+    /// Atomically replaces every placement, including durable pending moves.
+    /// A failed write must leave the previous record intact.
     func setFocusListPlacements(_ placements: [FocusListPlacement]) throws
 }
 

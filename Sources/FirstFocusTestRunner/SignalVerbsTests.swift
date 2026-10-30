@@ -50,11 +50,10 @@ private func makeHarness(_ tasks: [ReminderTask] = [], suggestions: [Signal] = [
     let recorder = Recorder()
     verbs.notForMe = SignalVerbs.NotForMe(
         mark: { signal in
-            guard recorder.offersNotForMe else { return false }
+            guard recorder.offersNotForMe else { return nil }
             recorder.marked.append(signal.id)
-            return true
-        },
-        undo: { recorder.undone.append($0.id) }
+            return { recorder.undone.append(signal.id) }
+        }
     )
     board.loadStoredMessages()
     return Harness(verbs: verbs, board: board, snoozes: snoozes, taskSource: taskSource, store: store, clock: clock, recorder: recorder)

@@ -116,6 +116,7 @@ private func makeModel(_ taskSource: FakeTaskSource, _ preference: FocusListPref
 }
 
 func registerFocusListTests(_ runner: TestRunner) {
+    registerFocusListRecoveryTests(runner)
     runner.suite("Focus list: keeping it in line with the Focus Tier") { r in
         r.run("the first sync makes a Focus list and moves the Focus Tier into it") {
             let h = await MainActor.run {

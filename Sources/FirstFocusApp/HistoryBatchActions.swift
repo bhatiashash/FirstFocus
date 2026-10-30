@@ -17,6 +17,29 @@ public final class HistoryBatchActions {
     /// Called whenever what History shows may have changed.
     public var onChange: (() -> Void)?
 
+    public var onRetriedInboxFeedback: ((Signal, @escaping @MainActor () -> Void) -> Void)?
+    public private(set) var failures: [AppFailure] = []
+    private var retries: [String: () -> Void] = [:]
+    private var undoReceipts: [String: (HistoryBatch, FeedbackSnapshot)] = [:]
+
+    public func retryFailure(_ id: String) {
+        retries[id]?()
+    }
+
+    public func dismissFailure(_ id: String) {
+        retries[id] = nil
+        failures.removeAll { $0.id == id }
+        ownerDidChange(.failure)
+    }
+
+    private func failed(_ id: String, message: String, retry: (() -> Void)?) {
+        retries[id] = retry
+        let failure = AppFailure(id: id, message: message, canRetry: retry != nil)
+        if let index = failures.firstIndex(where: { $0.id == id }) { failures[index] = failure }
+        else { failures.append(failure) }
+        ownerDidChange(.failure)
+    }
+
     /// What the owner has to redo after History changed something.
     enum Change {
         /// A Messages Signal on the Board was added, dismissed or reopened,
@@ -24,6 +47,7 @@ public final class HistoryBatchActions {
         case board
         /// Only what History itself holds changed.
         case history
+        case failure
     }
 
     private let ownerDidChange: (Change) -> Void
@@ -35,13 +59,14 @@ public final class HistoryBatchActions {
     private let historyStore: any HistoryStore
     private let signalStore: any BatchLedger & MessagesIntakeState
     private let corrections: Corrections
+    private let feedback: BatchFeedback?
     /// Its toggle decides whether "This was work" is offered, and whether a
     /// Screened Batch offers Add Task instead (screening-optional).
     private let screeningSettings: ScreeningSettings
 
     init(
         ownerDidChange: @escaping (Change) -> Void, board: SignalBoard, intakeRunner: IntakeRunner, extraction: ExtractionHost, historyStore: any HistoryStore, signalStore: any BatchLedger & MessagesIntakeState,
-        corrections: Corrections, screeningSettings: ScreeningSettings
+        corrections: Corrections, feedback: BatchFeedback?, screeningSettings: ScreeningSettings
     ) {
         self.ownerDidChange = ownerDidChange
         self.board = board
@@ -50,6 +75,7 @@ public final class HistoryBatchActions {
         self.historyStore = historyStore
         self.signalStore = signalStore
         self.corrections = corrections
+        self.feedback = feedback
         self.screeningSettings = screeningSettings
     }
 
@@ -100,10 +126,73 @@ public final class HistoryBatchActions {
     /// Records the Correction and dismisses the open Signals the Batch
     /// produced, so one click both teaches the model and clears the task.
     public func notForMe(_ batch: HistoryBatch) {
-        guard isEnabled(.notForMe, for: batch), let target = notForMeTarget(batch) else { return }
-        try? corrections.recordNotForMe(target.row)
-        board.dismiss(sourceRef: target.sourceRef)
-        changed(.board)
+        _ = markNotForMe(batch, suggestion: nil)
+    }
+
+    private func markNotForMe(_ batch: HistoryBatch, suggestion: Signal?) -> Bool {
+        guard isEnabled(.notForMe, for: batch), let target = notForMeTarget(batch) else { return false }
+        let id = "feedback-mark-\(target.sourceRef)"
+        do {
+            guard let persistence = feedback else { throw FeedbackError.unavailable }
+            let snapshot = try persistence.feedbackSnapshot(sourceRef: target.sourceRef)
+            return applyNotForMe(batch, suggestion: suggestion, expecting: snapshot, failureID: id, retrying: false)
+        } catch {
+            feedbackReadFailed(id, sourceRef: target.sourceRef)
+            return false
+        }
+    }
+
+    private func feedbackReadFailed(_ id: String, sourceRef: String) {
+        failed(id, message: "Couldn’t read feedback state. Nothing changed. Retry to refresh, then choose the action again.", retry: { [weak self] in
+            guard let self else { return }
+            do {
+                guard let persistence = self.feedback else { throw FeedbackError.unavailable }
+                _ = try persistence.feedbackSnapshot(sourceRef: sourceRef)
+                self.retries[id] = nil
+                self.failures.removeAll { $0.id == id }
+                self.board.loadStoredMessages()
+                self.changed(.board)
+            } catch {
+                self.feedbackReadFailed(id, sourceRef: sourceRef)
+            }
+        })
+    }
+
+    private func applyNotForMe(
+        _ batch: HistoryBatch, suggestion: Signal?, expecting snapshot: FeedbackSnapshot, failureID: String, retrying: Bool
+    ) -> Bool {
+        do {
+            guard let persistence = feedback, let target = notForMeTarget(batch),
+                  isEnabled(.notForMe, for: batch) else { throw FeedbackError.stale }
+            if retrying {
+                guard let fresh = historyStore.batches(forSourceRefs: [target.sourceRef])[target.sourceRef],
+                      fresh.rows.map(\.id) == batch.rows.map(\.id) else {
+                    throw FeedbackError.stale
+                }
+                if suggestion != nil, !inboxOffersNotForMe(batch, facts: facts(forBatches: [batch])) {
+                    throw FeedbackError.stale
+                }
+            }
+            let receipt = try persistence.markNotForMe(target.row, expecting: snapshot)
+            undoReceipts[target.sourceRef] = (batch, receipt)
+            failures.removeAll { $0.id == failureID }
+            retries[failureID] = nil
+            board.loadStoredMessages()
+            changed(.board)
+            if retrying, let suggestion {
+                onRetriedInboxFeedback?(suggestion, { [weak self] in
+                    _ = self?.undoNotForMe(batch, owning: receipt)
+                })
+            }
+            return true
+        } catch FeedbackError.stale {
+            failed(failureID, message: "Feedback wasn’t retried because this Batch changed. Review its current actions.", retry: nil)
+        } catch {
+            failed(failureID, message: "Couldn’t save Not for me. Nothing changed.", retry: { [weak self] in
+                _ = self?.applyNotForMe(batch, suggestion: suggestion, expecting: snapshot, failureID: failureID, retrying: true)
+            })
+        }
+        return false
     }
 
     /// "Not for me" from the Suggested Tasks Inbox: the same Correction and
@@ -114,8 +203,8 @@ public final class HistoryBatchActions {
         guard let batch = batch(of: suggestion), inboxOffersNotForMe(batch, facts: facts(forBatches: [batch])) else {
             return false
         }
-        notForMe(batch)
-        return true
+        guard signalStore.openSignals().contains(where: { $0.id == suggestion.id && isSuggestion($0) }) else { return false }
+        return markNotForMe(batch, suggestion: suggestion)
     }
 
     /// Undoes "Not for me" on the Batch `suggestion` came from: the Undo
@@ -123,6 +212,11 @@ public final class HistoryBatchActions {
     public func undoNotForMe(of suggestion: Signal) {
         guard let batch = batch(of: suggestion) else { return }
         undoNotForMe(batch)
+    }
+
+    public func undoAction(for suggestion: Signal) -> @MainActor () -> Void {
+        guard let (batch, snapshot) = undoReceipts[suggestion.sourceRef] else { return {} }
+        return { [weak self] in _ = self?.undoNotForMe(batch, owning: snapshot) }
     }
 
     private func batch(of suggestion: Signal) -> HistoryBatch? {
@@ -138,13 +232,34 @@ public final class HistoryBatchActions {
     @discardableResult
     public func undoNotForMe(_ batch: HistoryBatch) -> [String] {
         guard offersNow(batch)[.notForMe] == .taken, let sourceRef = batch.sourceRef else { return [] }
-        // A Correction that can't be deleted keeps its Suggestions dismissed,
-        // so History and the Inbox never disagree about the mark.
-        do { try corrections.removeNotForMe(fromBatch: sourceRef) } catch { return [] }
-        let reopened = signalStore.notForMeDismissals(ofBatch: sourceRef)
-        board.reopen(signalIds: reopened)
-        changed(.board)
-        return reopened
+        do {
+            guard let persistence = feedback else { throw FeedbackError.unavailable }
+            return undoNotForMe(batch, owning: try persistence.feedbackSnapshot(sourceRef: sourceRef))
+        } catch {
+            feedbackReadFailed("feedback-undo-\(sourceRef)", sourceRef: sourceRef)
+            return []
+        }
+    }
+
+    private func undoNotForMe(_ batch: HistoryBatch, owning snapshot: FeedbackSnapshot) -> [String] {
+        guard let sourceRef = batch.sourceRef else { return [] }
+        let id = "feedback-undo-\(sourceRef)"
+        do {
+            guard let persistence = feedback else { throw FeedbackError.unavailable }
+            let reopened = try persistence.undoNotForMe(sourceRef: sourceRef, owning: snapshot)
+            retries[id] = nil
+            failures.removeAll { $0.id == id }
+            board.loadStoredMessages()
+            changed(.board)
+            return reopened
+        } catch FeedbackError.stale {
+            failed(id, message: "Undo wasn’t applied because newer feedback replaced this action. Nothing changed.", retry: nil)
+        } catch {
+            failed(id, message: "Couldn’t undo Not for me. Nothing changed.", retry: { [weak self] in
+                _ = self?.undoNotForMe(batch, owning: snapshot)
+            })
+        }
+        return []
     }
 
     /// Records the Correction, then sends the Batch straight to the model,

@@ -1,6 +1,7 @@
 import FirstFocusApp
 import FirstFocusCore
 import Foundation
+import SQLite3
 
 /// The first tests that construct `AppModel` at all. Before the FirstFocusApp
 /// target existed (ADR 0020) nothing here was reachable: the app model
@@ -30,7 +31,7 @@ private struct Harness: @unchecked Sendable {
     let reExtractionSettings: ReExtractionSettings
     let extractor: FakeIntentExtractor
     let historyStore: SQLiteHistoryStore
-    let correctionStore: FakeCorrectionStore
+    let correctionStore: SQLiteCorrectionStore
     let now: SettableNow
 }
 
@@ -44,7 +45,7 @@ private func makeHarness(
     tasks: [ReminderTask] = [],
     reminders: SourceAvailability = .available,
     messages: SourceAvailability = .available,
-    messagesList: [ChatMessage] = []
+    messagesList: [ChatMessage] = [], focusSync: Bool = false
 ) -> Harness {
     let taskSource = FakeTaskSource(tasks: tasks, availability: reminders)
     let messagesSource = FakeMessagesSource(messages: messagesList, availability: messages)
@@ -59,14 +60,23 @@ private func makeHarness(
     // re-extraction's cooldown never touch the real ones this machine's
     // app is using.
     let defaults = UserDefaults(suiteName: "FirstFocusTests-\(UUID().uuidString)")!
+    let focusPreference = FocusListPreference(defaults: defaults)
+    focusPreference.isEnabled = focusSync
+    if focusSync {
+        taskSource.addList(id: "home", title: "Reminders")
+        taskSource.addList(id: "focus", title: "Focus")
+        taskSource.defaultList = "home"
+        focusPreference.listId = "focus"
+    }
     let reExtractionSettings = ReExtractionSettings(defaults: defaults)
     let extractor = FakeIntentExtractor(responses: [:])
-    let historyStore = makeTestHistoryStore()
-    let correctionStore = FakeCorrectionStore()
+    let historyStore = SQLiteHistoryStore(path: signalStore.databasePath)
+    let correctionStore = SQLiteCorrectionStore(path: signalStore.databasePath)
     let now = SettableNow()
     let model = AppModel(AppDependencies.test { d in
         d.now = { now.date }
         d.taskSource = taskSource
+        d.focusListPreference = focusPreference
         d.messagesSource = messagesSource
         d.signalStore = signalStore
         d.contactsResolver = FakeContactsResolver()
@@ -105,6 +115,75 @@ private func settle() async {
 }
 
 func registerAppModelTests(_ runner: TestRunner) {
+    runner.suite("AppModel: shared nonblocking Focus sync failures") { suite in
+        for expected in [FocusListFailure.persistenceRead, .persistenceWrite, .reminders] {
+            suite.run("publishes \(expected) once, dismisses without spam, and retries on refresh") {
+                let h = await MainActor.run { makeHarness(tasks: [ReminderTask(
+                    id: "focus-failure-task", title: "Important task", dueAt: nil, priority: .high,
+                    createdAt: Date(), listId: "home"
+                )], focusSync: true) }
+                _ = h.signalStore.focusListPlacements()
+                let path = h.signalStore.databasePath
+                let backup = path + ".saved"
+                func execute(_ sql: String) throws {
+                    var database: OpaquePointer?
+                    guard sqlite3_open(path, &database) == SQLITE_OK, let database else {
+                        throw TestFailure(message: "Cannot open Focus test database")
+                    }
+                    defer { sqlite3_close(database) }
+                    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                        throw TestFailure(message: String(cString: sqlite3_errmsg(database)))
+                    }
+                }
+                switch expected {
+                case .persistenceRead:
+                    try FileManager.default.moveItem(atPath: path, toPath: backup)
+                    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+                case .persistenceWrite:
+                    try execute("CREATE TRIGGER fail_focus_write BEFORE INSERT ON focus_list BEGIN SELECT RAISE(ABORT, 'injected'); END")
+                case .reminders: h.taskSource.unmovableIds = ["focus-failure-task"]
+                }
+                defer {
+                    if FileManager.default.fileExists(atPath: backup) {
+                        try? FileManager.default.removeItem(atPath: path)
+                        try? FileManager.default.moveItem(atPath: backup, toPath: path)
+                    }
+                }
+                await h.model.reload()
+                await h.model.focusListSettled()
+                try await MainActor.run {
+                    try expect(h.model.focusListFailure == expected)
+                    try expect(h.model.failures.count == 1)
+                    try expect(!h.model.failures[0].message.isEmpty)
+                    try expect(!h.model.rankedList.focus.isEmpty, "failure must not block the list")
+                }
+                await h.model.reload()
+                await h.model.focusListSettled()
+                try await MainActor.run {
+                    try expect(h.model.failures.count == 1, "same failure must not accumulate messages")
+                    h.model.dismissFailure("focus-list-sync")
+                    try expect(h.model.failures.isEmpty)
+                }
+                await h.model.reload()
+                await h.model.focusListSettled()
+                try await MainActor.run { try expect(h.model.failures.isEmpty, "dismissed failures stay quiet") }
+                switch expected {
+                case .persistenceRead:
+                    try FileManager.default.removeItem(atPath: path)
+                    try FileManager.default.moveItem(atPath: backup, toPath: path)
+                case .persistenceWrite: try execute("DROP TRIGGER fail_focus_write")
+                case .reminders: h.taskSource.unmovableIds = []
+                }
+                await h.model.reload()
+                await h.model.focusListSettled()
+                try await MainActor.run {
+                    try expect(h.model.focusListFailure == nil)
+                    try expect(h.model.failures.isEmpty)
+                    try expect(h.taskSource.tasks.first?.listId == "focus")
+                }
+            }
+        }
+    }
     runner.suite("AppModel: Gates degrade rather than block (ADR 0005)") { r in
         r.run("a granted Reminders Gate puts its tasks on the ranked list") {
             let h = await MainActor.run { makeHarness(tasks: [task(id: "r1", title: "Call the dentist")]) }
@@ -505,7 +584,7 @@ func registerAppModelTests(_ runner: TestRunner) {
             )
             await MainActor.run { h.model.historyActions.notForMe(historyBatch(entry)) }
 
-            let recorded = try require(h.correctionStore.stored.first)
+            let recorded = try require(h.correctionStore.corrections(ofType: .falsePositive, createdAfter: nil, limit: 10).first)
             try expect(recorded.chatId == 42)
             try expect(recorded.sourceRef == "m1")
             try expect(recorded.inputText == "[latest messages]\nThem: call the dentist")
@@ -532,7 +611,7 @@ func registerAppModelTests(_ runner: TestRunner) {
                 sourceRef: "m1"
             )
             await MainActor.run { h.model.historyActions.notForMe(historyBatch(entry)) }
-            try expect(h.correctionStore.stored.isEmpty, "there's no Chat to scope a Correction to")
+            try expect(h.correctionStore.corrections(ofType: .falsePositive, createdAfter: nil, limit: 10).isEmpty, "there's no Chat to scope a Correction to")
         }
     }
 }

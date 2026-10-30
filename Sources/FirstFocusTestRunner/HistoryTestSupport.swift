@@ -69,8 +69,8 @@ func makeHistoryApp(
         try? store.recordNonSelfMessagesCutoff(.distantPast)
         return store
     }()
-    let history = history ?? makeTestHistoryStore()
-    let correctionsPath = testStorePath()
+    let history = history ?? SQLiteHistoryStore(path: signals.databasePath)
+    let correctionsPath = signals.databasePath
     let corrections = SQLiteCorrectionStore(path: correctionsPath)
     let taskSource = FakeTaskSource(tasks: [], availability: .available)
     let undoAlarm = FakeAlarm()

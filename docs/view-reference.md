@@ -4,7 +4,16 @@ The app was called DailyOS until 0.1.6; the code, bundle identifier and executab
 
 Every screen and control, mapped to what it does today. Updated with every UI change.
 
-Last updated: 2026-10-05
+Last updated: 2026-10-30
+
+## Nonblocking failures
+
+Storage and Focus sync failures appear in a shared message area at the bottom of the window, including Main, History and Advanced. They do not open a modal or prevent other actions. Each failure has Dismiss; repeated attempts update the same message rather than adding duplicates.
+
+- **Not for me:** History and the Inbox save the Correction and dismiss the Batch’s currently open message Suggestions together. Failure changes neither the Correction nor Suggestions and offers no success or new Undo bar. Retry attempts the original action only if the Batch and its eligibility have not changed; otherwise the message asks you to review current actions. Other Batches are unaffected.
+- **Undo Not for me:** deleting the action’s Correction and reopening its still-owned dismissals happen together. A later approval, completion, dismissal or replacement feedback is never reversed. Failure leaves both records unchanged and offers Retry independently of the Undo bar, even after that bar clears or expires. Ownership survives relaunch; History can still undo the recorded action. Retry messages themselves last for the current app session.
+- **Unreadable feedback state:** Retry refreshes storage without replaying an action whose original state could not be verified. After recovery, choose Not for me or Undo in History again.
+- **Focus list sync:** a message distinguishes an unreadable sync record, a record that could not be saved, and a Reminders update failure. Sync automatically retries on the next meaningful Reminders refresh, not in a tight loop. Dismissing a message keeps the same ongoing failure quiet; successful sync clears it, allowing a future failure to be reported again.
 
 ## Window chrome and toolbar
 
