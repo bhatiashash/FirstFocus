@@ -36,6 +36,30 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         }
     }
 
+    /// One connection for all of `sourceRefs`, asked in chunks that stay
+    /// under SQLite's limit on bound variables.
+    public func processedSourceRefs(among sourceRefs: [String]) -> Set<String> {
+        guard !sourceRefs.isEmpty, let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+        var processed: Set<String> = []
+        let chunkSize = 500
+        for start in stride(from: 0, to: sourceRefs.count, by: chunkSize) {
+            let chunk = sourceRefs[start..<min(start + chunkSize, sourceRefs.count)]
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let sql = "SELECT source_ref FROM processed_messages WHERE source_ref IN (\(placeholders))"
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return processed }
+            for (index, ref) in chunk.enumerated() {
+                sqlite3_bind_text(statement, Int32(index + 1), ref, -1, sqliteTransient)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let ref = columnText(statement!, 0) { processed.insert(ref) }
+            }
+        }
+        return processed
+    }
+
     public func recordProcessedBatch(_ batch: MessageBatch, signals: [Signal], superseding: [Supersession]) throws {
         guard let db = open() else { throw SignalStoreError.cannotOpen }
         defer { sqlite3_close(db) }

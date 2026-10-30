@@ -19,6 +19,10 @@ public protocol BatchLedger: Sendable {
     /// through Extraction, whether or not that run produced any Signals.
     func isProcessed(sourceRef: String) -> Bool
 
+    /// Which of `sourceRefs` are Processed, in one read. The same answer as
+    /// asking `isProcessed` about each, for a caller that holds many.
+    func processedSourceRefs(among sourceRefs: [String]) -> Set<String>
+
     /// Marks every message in `batch` Processed, records which messages
     /// the Batch held (ADR 0039), and stores `signals` (possibly empty),
     /// all in one transaction. It fails if any member is already
@@ -99,6 +103,11 @@ public protocol BatchLedger: Sendable {
 }
 
 public extension BatchLedger {
+    /// A store with no faster way to answer asks about each reference.
+    public func processedSourceRefs(among sourceRefs: [String]) -> Set<String> {
+        Set(sourceRefs.filter { isProcessed(sourceRef: $0) })
+    }
+
     /// A Batch whose answer Supersedes no Suggestion.
     func recordProcessedBatch(_ batch: MessageBatch, signals: [Signal]) throws {
         try recordProcessedBatch(batch, signals: signals, superseding: [])

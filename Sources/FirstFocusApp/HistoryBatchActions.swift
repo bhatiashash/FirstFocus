@@ -68,7 +68,7 @@ public final class HistoryBatchActions {
             isModelLoaded: base?.isModelLoaded ?? extraction.isLoaded,
             correctionTypes: corrections.types(forBatches: refs), supersessions: signalStore.supersessions(byBatches: refs),
             mutedChats: base?.mutedChats ?? signalStore.mutedChatIds(),
-            processedBatches: Set(refs.filter { signalStore.isProcessed(sourceRef: $0) })
+            processedBatches: signalStore.processedSourceRefs(among: refs)
         )
     }
 

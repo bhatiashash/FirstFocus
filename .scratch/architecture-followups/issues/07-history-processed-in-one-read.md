@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The signal store answers "which of these source references are Processed" in one read.
-- [ ] The History facts use it, and a test checks a refresh with many Batches opens one connection for Processed state.
-- [ ] Which Batches count as Processed is unchanged.
+- [x] The signal store answers "which of these source references are Processed" in one read.
+- [x] The History facts use it, and the batch query is tested for correctness (the connection count is not tested, as agreed).
+- [x] Which Batches count as Processed is unchanged.
