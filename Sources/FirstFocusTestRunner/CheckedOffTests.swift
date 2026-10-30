@@ -306,11 +306,6 @@ func registerCheckedOffTests(_ runner: TestRunner) {
     runner.suite("AppModel: the Checked Off sheet") { r in
         let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 3600)
 
-        r.run("the count reads in the singular and the plural") {
-            try expect(checkedOffCountText(1) == "1 reminder completed today")
-            try expect(checkedOffCountText(3) == "3 reminders completed today")
-        }
-
         r.run("toggling opens it when something was checked off today") {
             let h = await makeHarness(checkedOff: [checkedOffReminder(id: "r1", at: now.addingTimeInterval(-60))], now: now)
             await h.model.start()

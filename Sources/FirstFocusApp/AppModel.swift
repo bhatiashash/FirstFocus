@@ -659,6 +659,37 @@ public final class AppModel: ObservableObject {
         verbs.prepareToQuit()
     }
 
+    /// Esc: leaves Zen Focus Mode or Minimal View, Zen first. `true` when the
+    /// key was taken; `false` leaves it for whatever else is listening.
+    @discardableResult
+    public func pressEscape(window: WindowFocus) -> Bool {
+        let mode = PresentationMode(isZen: isZenFocusModeEnabled, isMinimalView: isMinimalViewEnabled)
+        switch mode.escapeExit(window: window, isPreviewOpen: previewedSuggestionId != nil) {
+        case .zen: isZenFocusModeEnabled = false
+        case .minimalView: isMinimalViewEnabled = false
+        case nil: return false
+        }
+        return true
+    }
+
+    /// ⌘Z triggers the Undo bar before the Edit menu sees it: only while the
+    /// bar offers an Undo, the main window is key with no sheet over it, and
+    /// no text is being edited, where ⌘Z undoes typing. `true` when taken.
+    @discardableResult
+    public func pressCommandZ(window: WindowFocus) -> Bool {
+        guard undoOffer?.canUndo == true, window.isMainWindowKey, !window.hasSheet, !window.isEditingText else {
+            return false
+        }
+        Task { await undo() }
+        return true
+    }
+
+    /// The count at the end of the window that opens the Checked Off sheet
+    /// (CONTEXT.md: Checked Off).
+    public var checkedOffCountText: String {
+        checkedOffCount == 1 ? "1 reminder completed today" : "\(checkedOffCount) reminders completed today"
+    }
+
     /// The Undo bar's button, and ⌘Z: reverses whatever the bar offers.
     /// Does nothing when the bar is hidden or only reports.
     public func undo() async {

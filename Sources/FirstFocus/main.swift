@@ -501,19 +501,9 @@ let minimalViewEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDo
     let escapeKeyCode: UInt16 = 53
     guard event.keyCode == escapeKeyCode,
         event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
-        escapeLeavesPresentationMode(
-            isActive: model.isMinimalViewEnabled || model.isZenFocusModeEnabled,
-            isMainWindowKey: NSApp.keyWindow === window,
-            hasSheet: window.attachedSheet != nil, isPreviewOpen: model.previewedSuggestionId != nil
-        )
+        model.pressEscape(window: WindowFocus(isMainWindowKey: NSApp.keyWindow === window, hasSheet: window.attachedSheet != nil))
     else {
         return event
-    }
-    // Zen first, since it can sit on top of Minimal View.
-    if model.isZenFocusModeEnabled {
-        model.isZenFocusModeEnabled = false
-    } else {
-        model.isMinimalViewEnabled = false
     }
     return nil
 }
@@ -524,14 +514,13 @@ let minimalViewEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDo
 let undoBarMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
     guard event.charactersIgnoringModifiers?.lowercased() == "z",
         event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-        commandZUndoesOffer(
-            canUndo: model.undoOffer?.canUndo == true, isMainWindowKey: NSApp.keyWindow === window,
-            hasSheet: window.attachedSheet != nil, isEditingText: window.firstResponder is NSText
-        )
+        model.pressCommandZ(window: WindowFocus(
+            isMainWindowKey: NSApp.keyWindow === window, hasSheet: window.attachedSheet != nil,
+            isEditingText: window.firstResponder is NSText
+        ))
     else {
         return event
     }
-    Task { await model.undo() }
     return nil
 }
 

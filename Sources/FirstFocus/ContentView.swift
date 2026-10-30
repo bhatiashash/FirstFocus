@@ -205,7 +205,7 @@ struct ContentView: View {
     /// The Checked Off count at the bottom of the window, outside the
     /// scroll view, under both the list and the empty screen.
     private var pinnedCheckedOffCount: some View {
-        CheckedOffCountButton(count: model.checkedOffCount) { model.toggleCheckedOffSheet() }
+        CheckedOffCountButton(text: model.checkedOffCountText) { model.toggleCheckedOffSheet() }
             .padding(.vertical, sectionHeaderTopPadding)
     }
 
@@ -519,11 +519,11 @@ struct ContentView: View {
 /// opens the Checked Off sheet: plain muted text, so it reads as a status
 /// line rather than one more row of work.
 private struct CheckedOffCountButton: View {
-    let count: Int
+    let text: String
     let action: () -> Void
 
     var body: some View {
-        Button(checkedOffCountText(count), action: action)
+        Button(text, action: action)
             .buttonStyle(.plain)
             .font(.footnote)
             .foregroundStyle(.secondary)

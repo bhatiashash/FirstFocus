@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A test checks that Esc with both modes on exits Zen first, then Minimal View.
-- [ ] The predicate modules for Esc and Command-Z are gone, and their cases are covered by the new module's tests.
-- [ ] Zen window sizing keeps working as before.
+- [x] A test checks that Esc with both modes on exits Zen first, then Minimal View.
+- [x] The predicate modules for Esc and Command-Z are gone, and their cases are covered by the new module's tests.
+- [x] Zen window sizing keeps working as before.

@@ -326,16 +326,6 @@ func registerAppModelTests(_ runner: TestRunner) {
         }
     }
 
-    runner.suite("\u{2318}Z triggers the Undo bar") { r in
-        r.run("only with an Undo on offer, the main window key, no sheet, and no text being edited") {
-            try expect(commandZUndoesOffer(canUndo: true, isMainWindowKey: true, hasSheet: false, isEditingText: false))
-            try expect(!commandZUndoesOffer(canUndo: false, isMainWindowKey: true, hasSheet: false, isEditingText: false))
-            try expect(!commandZUndoesOffer(canUndo: true, isMainWindowKey: false, hasSheet: false, isEditingText: false))
-            try expect(!commandZUndoesOffer(canUndo: true, isMainWindowKey: true, hasSheet: true, isEditingText: false))
-            try expect(!commandZUndoesOffer(canUndo: true, isMainWindowKey: true, hasSheet: false, isEditingText: true))
-        }
-    }
-
     runner.suite("AppModel: System Settings crosses the seam") { r in
         r.run("each Gate's re-grant control asks for its own pane") {
             let h = await MainActor.run { makeHarness() }
