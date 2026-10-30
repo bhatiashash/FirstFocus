@@ -60,6 +60,6 @@ func writeCSV(modelResults: [ModelResult], allItems: [CorpusItem]) {
 
     let csv = rows.map { row in row.map(csvField).joined(separator: ",") }.joined(separator: "\n")
     let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
-    let outputPath = (desktopURL?.path ?? FileManager.default.currentDirectoryPath) + "/DailyOS_Model_Evaluation.csv"
+    let outputPath = (desktopURL?.path ?? FileManager.default.currentDirectoryPath) + "/FirstFocus_Model_Evaluation.csv"
     try? csv.write(toFile: outputPath, atomically: true, encoding: .utf8)
 }

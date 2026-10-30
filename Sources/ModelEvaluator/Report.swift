@@ -1,4 +1,4 @@
-import DailyOSCore
+import FirstFocusCore
 import Foundation
 
 /// One row per category, one column per model, each cell the correct
@@ -24,7 +24,7 @@ private func categoryTable(firstColumn: String, categories: [String], modelResul
 
 func writeReport(modelResults: [ModelResult], syntheticItemCount: Int, realItemCount: Int, correctionItemCount: Int) {
     var out = ""
-    out += "# DailyOS Model Comparison Study\n\n"
+    out += "# FirstFocus Model Comparison Study\n\n"
     out += "Generated \(ISO8601DateFormatter().string(from: Date())) by `swift run -c release ModelEvaluator`.\n\n"
 
     out += "## Methodology Note\n\n"
@@ -68,7 +68,7 @@ func writeReport(modelResults: [ModelResult], syntheticItemCount: Int, realItemC
     out += categoryTable(firstColumn: "Correction type", categories: correctionCategories, modelResults: modelResults)
 
     out += "## Cross-Model Discrepancies\n\n"
-    out += "Items where the three models didn't agree on task-vs-NONE — the spec's own \"flag discrepancies where one model found a signal but another returned zero-Signals.\" Full detail (including which model) is in `DailyOS_Model_Evaluation.csv`'s `Signal_Discrepancy` column; this is just the count.\n\n"
+    out += "Items where the three models didn't agree on task-vs-NONE — the spec's own \"flag discrepancies where one model found a signal but another returned zero-Signals.\" Full detail (including which model) is in `FirstFocus_Model_Evaluation.csv`'s `Signal_Discrepancy` column; this is just the count.\n\n"
     if modelResults.count == 3, modelResults.allSatisfy({ $0.loadError == nil }) {
         let (a, b, c) = (modelResults[0].runs, modelResults[1].runs, modelResults[2].runs)
         let discrepancyCount = zip(zip(a, b), c).filter { pair, thirdRun in

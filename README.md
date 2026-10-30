@@ -89,23 +89,23 @@ cd FirstFocus
 CERT_NAME=- ./build.sh          # "-" signs ad hoc
 
 # Run the tests
-swift run DailyOSTestRunner
+swift run FirstFocusTestRunner
 ```
 
 `build.sh` signs with a certificate named in `CERT_NAME`. Signing ad hoc (`-`) works, but macOS treats every rebuild as a new app, so you will need to grant Full Disk Access again after each build. A self-signed certificate in your login keychain avoids that.
 
-The tests use a small runner of their own (`Sources/DailyOSTestRunner`) instead of XCTest, so they run with only the Command Line Tools installed.
+The tests use a small runner of their own (`Sources/FirstFocusTestRunner`) instead of XCTest, so they run with only the Command Line Tools installed.
 
 ### Project layout
 
-FirstFocus was called DailyOS until version 0.1.6. The code still uses that name, along with the bundle identifier, so existing installs keep their data and permissions.
+FirstFocus was called DailyOS until version 0.1.6. The code, bundle identifier and executable now use the new name.
 
 | Path | What's there |
 |---|---|
-| `Sources/DailyOSCore` | Sources, extraction, ranking, storage. No UI and no AppKit. |
-| `Sources/DailyOSApp` | The app model and view models, testable without a running app. |
-| `Sources/DailyOS` | The executable: SwiftUI views and AppKit glue. |
-| `Sources/DailyOSTestRunner` | The test suite. |
+| `Sources/FirstFocusCore` | Sources, extraction, ranking, storage. No UI and no AppKit. |
+| `Sources/FirstFocusApp` | The app model and view models, testable without a running app. |
+| `Sources/FirstFocus` | The executable: SwiftUI views and AppKit glue. |
+| `Sources/FirstFocusTestRunner` | The test suite. |
 | `Sources/ModelEvaluator` | A one-off study comparing the three models ([results](model_evaluation_report.md)). |
 | `docs/view-reference.md` | Every screen and control, and what it does. |
 | `build.sh`, `release.sh` | Build the app; publish a signed release and update feed. |

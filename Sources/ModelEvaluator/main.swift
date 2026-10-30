@@ -1,16 +1,16 @@
 import Darwin
-import DailyOSCore
+import FirstFocusCore
 import Foundation
 
 // One-off model comparison study, not part of the shipped app. Run with
 // `swift run -c release ModelEvaluator` from the package root — writes
-// model_evaluation_report.md there and DailyOS_Model_Evaluation.csv to
+// model_evaluation_report.md there and FirstFocus_Model_Evaluation.csv to
 // the Desktop. See the report's own Methodology Note for the caveats
 // this run is subject to (corpus is mostly synthetic, not real History;
 // one shared ChatML prompt template across all three models; token/ms
 // and hallucination figures are disclosed heuristics, not exact).
 
-let bundleIdentifier = "com.shashbhatia.DailyOS"
+let bundleIdentifier = "com.shashbhatia.FirstFocus"
 
 /// Where a case came from. Everything but `.synthetic` is someone's real
 /// message, so the committed report never quotes it (see
@@ -502,10 +502,10 @@ func run() async {
         correctionItemCount: correctionItems.count
     )
     writeCSV(modelResults: modelResults, allItems: allItems)
-    print("\nWrote model_evaluation_report.md and Desktop/DailyOS_Model_Evaluation.csv")
+    print("\nWrote model_evaluation_report.md and Desktop/FirstFocus_Model_Evaluation.csv")
 
     // llama.framework's known exit-time crash (documented in main.swift's
-    // AppDelegate, DailyOS target): normal process exit runs C++ static
+    // AppDelegate, FirstFocus target): normal process exit runs C++ static
     // destructors, one of which aborts inside ggml_metal_device_free.
     // `_exit` sidesteps that the same way the real app does, once there is
     // nothing left to do but leave.

@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Build, bundle and sign DailyOS with only Command Line Tools.
+# Build, bundle and sign FirstFocus with only Command Line Tools.
 #
 # Usage: ./build.sh [debug|release]
 set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG="${1:-debug}"
-ENV_FILE="$HOME/DailyOS-data/dailyos.env"
+ENV_FILE="$HOME/FirstFocus-data/firstfocus.env"
 
 CERT_NAME="${CERT_NAME:-}"
 if [[ -z "$CERT_NAME" && -f "$ENV_FILE" ]]; then
     CERT_NAME=$(grep -E '^CERT_NAME=' "$ENV_FILE" | tail -n1 | cut -d= -f2-)
 fi
-CERT_NAME="${CERT_NAME:-DailyOS Local Dev}"
+CERT_NAME="${CERT_NAME:-FirstFocus Local Dev}"
 
-echo "Building DailyOS ($CONFIG)..."
+echo "Building FirstFocus ($CONFIG)..."
 swift build -c "$CONFIG"
 BIN_PATH=$(swift build -c "$CONFIG" --show-bin-path)
 
 APP_BUNDLE=".build/FirstFocus.app"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
-cp "$BIN_PATH/DailyOS" "$APP_BUNDLE/Contents/MacOS/DailyOS"
+cp "$BIN_PATH/FirstFocus" "$APP_BUNDLE/Contents/MacOS/FirstFocus"
 cp Resources/Info.plist "$APP_BUNDLE/Contents/Info.plist"
 # Sparkle offers an update only when its CFBundleVersion is higher, so the
 # build number is the commit count, which only goes up. VERSION (release.sh

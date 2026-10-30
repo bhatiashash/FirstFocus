@@ -1,4 +1,4 @@
-# DailyOS Model Comparison Study
+# FirstFocus Model Comparison Study
 
 Generated 2026-09-25T00:42:15Z by `swift run -c release ModelEvaluator`.
 
@@ -65,7 +65,7 @@ Each stored "Not for me" or "Add task" Correction, replayed with the input the m
 
 ## Cross-Model Discrepancies
 
-Items where the three models didn't agree on task-vs-NONE — the spec's own "flag discrepancies where one model found a signal but another returned zero-Signals." Full detail (including which model) is in `DailyOS_Model_Evaluation.csv`'s `Signal_Discrepancy` column; this is just the count.
+Items where the three models didn't agree on task-vs-NONE — the spec's own "flag discrepancies where one model found a signal but another returned zero-Signals." Full detail (including which model) is in `FirstFocus_Model_Evaluation.csv`'s `Signal_Discrepancy` column; this is just the count.
 
 62 of 113 items had at least one model disagree with the other two on whether the message contained a task at all.
 

@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>DailyOS</string>
+	<string>FirstFocus</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.shashbhatia.DailyOS</string>
+	<string>com.shashbhatia.FirstFocus</string>
 	<key>CFBundleName</key>
 	<string>FirstFocus</string>
 	<key>CFBundleDisplayName</key>

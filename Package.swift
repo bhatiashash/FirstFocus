@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "DailyOS",
+    name: "FirstFocus",
     platforms: [.macOS("15.0")],
     dependencies: [
         // Confirmed working on this machine (Apple M3, Command Line Tools
@@ -15,7 +15,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "DailyOSCore",
+            name: "FirstFocusCore",
             dependencies: [
                 .product(name: "LlamaSwift", package: "llama.swift")
             ]
@@ -25,35 +25,35 @@ let package = Package(
         // `main.swift`, the views, and the AppKit/Carbon glue, none of
         // which is testable without a running application (ADR 0020).
         // Imports no AppKit: the foreground trigger and the System
-        // Settings opener are seams, so this inherits DailyOSCore's
+        // Settings opener are seams, so this inherits FirstFocusCore's
         // framework-free posture.
         .target(
-            name: "DailyOSApp",
-            dependencies: ["DailyOSCore"]
+            name: "FirstFocusApp",
+            dependencies: ["FirstFocusCore"]
         ),
         .executableTarget(
-            name: "DailyOS",
-            dependencies: ["DailyOSCore", "DailyOSApp", .product(name: "Sparkle", package: "Sparkle")]
+            name: "FirstFocus",
+            dependencies: ["FirstFocusCore", "FirstFocusApp", .product(name: "Sparkle", package: "Sparkle")]
         ),
         // Not a `.testTarget`: `swift test`'s runtime helper cannot load its
         // own test bundle on this machine (see TestHarness.swift for why).
-        // Run with `swift run DailyOSTestRunner`. Covers DailyOSApp as
-        // well as DailyOSCore, which is why it is no longer named for
+        // Run with `swift run FirstFocusTestRunner`. Covers FirstFocusApp as
+        // well as FirstFocusCore, which is why it is no longer named for
         // Core alone.
         .executableTarget(
-            name: "DailyOSTestRunner",
-            dependencies: ["DailyOSCore", "DailyOSApp"],
+            name: "FirstFocusTestRunner",
+            dependencies: ["FirstFocusCore", "FirstFocusApp"],
             resources: [.copy("Fixtures")]
         ),
         // One-off model comparison study (not part of the shipped app):
         // loads each of the three catalog models in turn and runs a fixed
         // corpus through `LlamaCppIntentExtractor`, writing
-        // model_evaluation_report.md. `DailyOSCore` only — no AppKit, no
+        // model_evaluation_report.md. `FirstFocusCore` only — no AppKit, no
         // EventKit, nothing beyond what reading the History DB and running
         // extraction actually needs.
         .executableTarget(
             name: "ModelEvaluator",
-            dependencies: ["DailyOSCore"]
+            dependencies: ["FirstFocusCore"]
         ),
     ]
 )
