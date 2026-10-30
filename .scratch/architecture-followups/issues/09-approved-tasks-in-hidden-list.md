@@ -4,8 +4,12 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Approving a Suggestion while the default list is unticked has a defined result, chosen and recorded in the ticket comments.
-- [ ] A test covers the case.
-- [ ] The Lists section footer and the view reference describe the behaviour.
+- [x] Approving a Suggestion while the default list is unticked has a defined result, chosen and recorded in the ticket comments.
+- [x] A test covers the case.
+- [x] The Lists section footer and the view reference describe the behaviour.
+
+## Comments
+
+Decision: keep approval as it is, and label the default list in Advanced. Approving still makes the reminder in the default list and clears the Suggestion; if that list is unticked the reminder is hidden. The default list shows "Approved tasks from messages go here", and a warning in orange while it is unticked.

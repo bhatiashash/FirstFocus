@@ -166,13 +166,22 @@ private struct ListsSection: View {
     var body: some View {
         Section {
             ForEach(ticks) { tick in
-                Toggle(tick.list.title, isOn: Binding(get: { tick.isTicked }, set: { setTick($0, tick.id) }))
-                    .toggleStyle(.checkbox)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle(tick.list.title, isOn: Binding(get: { tick.isTicked }, set: { setTick($0, tick.id) }))
+                        .toggleStyle(.checkbox)
+                    if tick.isDefault {
+                        Text(tick.isTicked
+                            ? "Approved tasks from messages go here."
+                            : "Approved tasks from messages go here, so they won't show in FirstFocus.")
+                            .font(.caption)
+                            .foregroundStyle(tick.isTicked ? Color.secondary : Color.orange)
+                    }
+                }
             }
         } header: {
             Text("Lists")
         } footer: {
-            Text("Untick a list to hide its reminders from FirstFocus: they leave Focus, Later, the Checked Off sheet and the Morning Brief, and the Focus list leaves them alone. Lists you make later start ticked. A task you approve from a message goes into your default list, so untick that one and approved tasks won't show here.")
+            Text("Untick a list to hide its reminders from FirstFocus: they leave Focus, Later, the Checked Off sheet and the Morning Brief, and the Focus list leaves them alone. Lists you make later start ticked. A task you approve from a message goes into your default list, so unticking that one hides approved tasks.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

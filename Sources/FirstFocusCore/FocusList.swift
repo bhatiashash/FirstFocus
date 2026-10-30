@@ -23,12 +23,16 @@ public struct FocusListPlacement: Equatable, Hashable, Sendable {
 public struct FocusListTick: Equatable, Sendable, Identifiable {
     public let list: ReminderList
     public let isTicked: Bool
+    /// Whether it is the default list, where a task approved from a message
+    /// is made.
+    public let isDefault: Bool
 
     public var id: String { list.id }
 
-    public init(list: ReminderList, isTicked: Bool) {
+    public init(list: ReminderList, isTicked: Bool, isDefault: Bool = false) {
         self.list = list
         self.isTicked = isTicked
+        self.isDefault = isDefault
     }
 }
 
@@ -103,10 +107,20 @@ public final class FocusList {
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
+    /// The default Reminders list's id, where a task approved from a
+    /// message is made.
+    public func defaultListId() async -> String? {
+        let taskSource = self.taskSource
+        return await Task.detached { taskSource.defaultListId() }.value
+    }
+
     /// Every Reminders list but the Focus list, and whether it is ticked. A
     /// list made after you last looked reads as ticked.
     public func lists() async -> [FocusListTick] {
-        await reminderLists().map { FocusListTick(list: $0, isTicked: isTicked($0.id)) }
+        let defaultId = await defaultListId()
+        return await reminderLists().map {
+            FocusListTick(list: $0, isTicked: isTicked($0.id), isDefault: $0.id == defaultId)
+        }
     }
 
     /// Whether `listId` is ticked.

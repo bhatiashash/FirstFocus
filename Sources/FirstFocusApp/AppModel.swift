@@ -199,10 +199,13 @@ public final class AppModel: ObservableObject {
     /// The Reminders lists Advanced shows, as of the last
     /// `refreshFocusListTicks()`. Which are ticked is the Focus list's.
     @Published private var reminderLists: [ReminderList] = []
+    private var defaultReminderListId: String?
     /// Each list and whether it is ticked, read from the Focus list every
     /// time, so no copy of the ticks can go stale.
     public var focusListTicks: [FocusListTick] {
-        reminderLists.map { FocusListTick(list: $0, isTicked: focusList.isTicked($0.id)) }
+        reminderLists.map {
+            FocusListTick(list: $0, isTicked: focusList.isTicked($0.id), isDefault: $0.id == defaultReminderListId)
+        }
     }
     /// Held directly, alongside handing the same instance to `board` at
     /// init, purely for `start()`'s one-time Gate request — requesting
@@ -595,6 +598,7 @@ public final class AppModel: ObservableObject {
 
     /// Reads Reminders' lists again, for Advanced as it opens.
     public func refreshFocusListTicks() async {
+        defaultReminderListId = await focusList.defaultListId()
         reminderLists = await focusList.reminderLists()
     }
 
