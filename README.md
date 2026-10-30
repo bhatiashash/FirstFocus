@@ -64,6 +64,8 @@ Things you need to do don't only live in your to-do app. Someone texts "can you 
 
 On first launch FirstFocus reads your recent notes to yourself in Messages, then keeps up with new messages as they arrive.
 
+Upgrading from DailyOS recovers its database once, including History, stars, corrections and task state. Existing FirstFocus records take precedence if both databases contain the same record. The original DailyOS database is left untouched, and SQLite backups of both databases are kept in `~/Library/Application Support/FirstFocus Migration Backups/` before merging. If recovery fails, the app reports the error and closes rather than opening an incomplete History.
+
 ### Setting up the Morning Brief
 
 1. Open **Advanced**. The Morning Brief section shows the conversation it will send to: your conversation with yourself in Messages. If none is found, text yourself once from your Mac or iPhone.

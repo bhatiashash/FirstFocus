@@ -237,6 +237,19 @@ app.delegate = appDelegate
 }
 app.mainMenu = makeMainMenu()
 
+do {
+    try AppDataMigration.recoverLegacyStore(
+        applicationSupportDirectory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    )
+} catch {
+    let alert = NSAlert()
+    alert.messageText = "FirstFocus couldn’t recover your previous data"
+    alert.informativeText = "Your original DailyOS data has not been changed. FirstFocus will close rather than show an incomplete History. \(error.localizedDescription)"
+    alert.alertStyle = .critical
+    alert.runModal()
+    exit(1)
+}
+
 // Every store and setting AppModel uses, built once (AppDependencies.live).
 // The view models below take the same instances from it rather than
 // building their own: one instance, not two that happen to agree because
