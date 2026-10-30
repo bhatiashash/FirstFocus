@@ -45,7 +45,8 @@ struct AdvancedTabView: View {
     var body: some View {
         Form {
             MorningBriefSection(viewModel: morningBriefViewModel)
-            FocusListSection(isEnabled: $isFocusListEnabled, ticks: focusListTicks, setTick: setFocusListTick)
+            ListsSection(ticks: focusListTicks, setTick: setFocusListTick)
+            FocusListSection(isEnabled: $isFocusListEnabled)
             OpenAtLoginSection(viewModel: openAtLoginViewModel)
             RulesSection(viewModel: rulesViewModel)
             ReExtractionSection(viewModel: viewModel)
@@ -142,21 +143,36 @@ private struct MorningBriefSection: View {
 /// the window. Under the toggle, a tick for each list it draws from.
 private struct FocusListSection: View {
     @Binding var isEnabled: Bool
+
+    var body: some View {
+        Section {
+            Toggle("Keep a Focus list in Reminders", isOn: $isEnabled)
+        } header: {
+            Text("Focus List")
+        } footer: {
+            Text("Moves every reminder in Focus from a ticked list into a Reminders list called Focus, and back to its own list when it leaves Focus or is snoozed. Putting a reminder in that list yourself, on your phone or in Reminders, moves it to Focus here. Taking one out moves it to Later, unless its due date keeps it in Focus. Moving a reminder into an unticked list takes it out for good. Turning this off moves everything back and leaves the list empty.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Which Reminders lists FirstFocus uses. An unticked list's reminders are
+/// hidden everywhere in FirstFocus and the Focus list leaves them alone.
+private struct ListsSection: View {
     let ticks: [FocusListTick]
     let setTick: (Bool, String) -> Void
 
     var body: some View {
         Section {
-            Toggle("Keep a Focus list in Reminders", isOn: $isEnabled)
             ForEach(ticks) { tick in
                 Toggle(tick.list.title, isOn: Binding(get: { tick.isTicked }, set: { setTick($0, tick.id) }))
                     .toggleStyle(.checkbox)
             }
-            .disabled(!isEnabled)
         } header: {
-            Text("Focus List")
+            Text("Lists")
         } footer: {
-            Text("Moves every reminder in Focus from a ticked list into a Reminders list called Focus, and back to its own list when it leaves Focus or is snoozed. Putting a reminder in that list yourself, on your phone or in Reminders, moves it to Focus here. Taking one out moves it to Later, unless its due date keeps it in Focus. Lists made later start unticked, and the Focus list leaves them alone; moving a reminder into an unticked list takes it out for good. Turning this off moves everything back and leaves the list empty.")
+            Text("Untick a list to hide its reminders from FirstFocus: they leave Focus, Later, the Checked Off sheet and the Morning Brief, and the Focus list leaves them alone. Lists you make later start ticked. A task you approve from a message goes into your default list, so untick that one and approved tasks won't show here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

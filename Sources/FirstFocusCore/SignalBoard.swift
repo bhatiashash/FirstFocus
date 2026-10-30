@@ -40,6 +40,11 @@ public final class SignalBoard {
     private var remindersReadAt = 0
     /// Each reminder's list, open and checked off, from the last fetch.
     private var reminderListIds: [String: String] = [:]
+    /// Reminders lists the window doesn't show (the unticked lists in
+    /// Advanced). Their reminders stay in the share, since the Focus list
+    /// still needs to send any of them home, but `rankedList` and
+    /// `checkedOff` leave them out.
+    public var hiddenListIds: Set<String> = []
     /// Read only to bound the checked-off fetch to today.
     private let now: @MainActor () -> Date
     /// What the last read of each Source found about its Gate. Recorded
@@ -137,6 +142,14 @@ public final class SignalBoard {
 
     // MARK: - Reading
 
+    /// The Reminders share without the reminders in hidden lists.
+    private var visibleReminderSignals: [Signal] {
+        guard !hiddenListIds.isEmpty else { return reminderSignals }
+        return reminderSignals.filter { signal in
+            !(reminderListIds[signal.id].map(hiddenListIds.contains) ?? false)
+        }
+    }
+
     /// Every Signal the window should show, ordered, tiered, deduplicated,
     /// and split into the Suggested Tasks Inbox versus everything else —
     /// derived fresh from the Board on every call, never stored (ADR
@@ -145,7 +158,7 @@ public final class SignalBoard {
     /// or one being optimistically deleted. The Board never learns why any
     /// of them are hidden.
     public func rankedList(now: Date, hiding: Set<String> = []) -> RankedList {
-        var combined = reminderSignals + messageSignals
+        var combined = visibleReminderSignals + messageSignals
         combined.removeAll { hiding.contains($0.id) }
         combined = hydrate(combined)
 
@@ -170,7 +183,10 @@ public final class SignalBoard {
     public func checkedOff(now: Date, hiding: Set<String> = []) -> [CheckedOffReminder] {
         let startOfDay = Calendar.current.startOfDay(for: now)
         return checkedOffReminders
-            .filter { $0.checkedOffAt >= startOfDay && !hiding.contains($0.id) }
+            .filter {
+                $0.checkedOffAt >= startOfDay && !hiding.contains($0.id)
+                    && !($0.task.listId.map(hiddenListIds.contains) ?? false)
+            }
             .sorted { $0.checkedOffAt > $1.checkedOffAt }
     }
 

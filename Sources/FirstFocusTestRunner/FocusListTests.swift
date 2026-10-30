@@ -38,8 +38,7 @@ private struct Harness: @unchecked Sendable {
 
 /// The lists Reminders, Work and, unless `withFocusList` is false, a
 /// Focus list FirstFocus already uses. `placed` is the record from the last
-/// sync. `withMuse` adds Muse List, made after the first sync, so seen
-/// and unticked.
+/// sync. `withMuse` adds Muse List, which you unticked.
 @MainActor
 private func makeHarness(
     _ tasks: [ReminderTask], checkedOff: [CheckedOffReminder] = [], placed: [FocusListPlacement] = [],
@@ -56,8 +55,7 @@ private func makeHarness(
     }
     if withMuse {
         taskSource.addList(id: muse, title: "Muse List")
-        preference.seenListIds = [home, work, muse]
-        preference.tickedListIds = [home, work]
+        preference.untickedListIds = [muse]
     }
     let store = makeTestSignalStore()
     try? store.setFocusListPlacements(placed)
@@ -219,23 +217,32 @@ func registerFocusListTests(_ runner: TestRunner) {
     }
 
     runner.suite("Focus list: the lists it draws from") { r in
-        r.run("the first sync ticks every list but the Focus list") {
+        r.run("every list starts ticked") {
             let h = await MainActor.run { makeHarness([]) }
             await sync(h)
-            try expect(h.preference.seenListIds == [home, work])
-            try expect(h.preference.tickedListIds == [home, work])
+            try expect(h.preference.untickedListIds.isEmpty)
+            let ticks = await h.focusList.lists()
+            try expect(ticks.map(\.list.title) == ["Reminders", "Work"] && ticks.allSatisfy(\.isTicked))
         }
 
-        r.run("a list made after the first sync starts unticked, empty or not") {
+        r.run("a list made later starts ticked, so its Focus Tier reminders move in") {
             let h = await MainActor.run { makeHarness([]) }
-            await sync(h)
-            h.taskSource.addList(id: muse, title: "Muse List")
             await sync(h)
             h.taskSource.addList(id: "later", title: "Later List")
             h.taskSource.add(task("b", priority: .high, list: "later"))
             await sync(h)
-            try expect(h.preference.tickedListIds == [home, work])
-            try expect(list(of: "b", in: h.taskSource) == "later")
+            try expect(h.preference.untickedListIds.isEmpty)
+            try expect(list(of: "b", in: h.taskSource) == focus)
+        }
+
+        r.run("an install with the old record keeps the lists that were unticked in it") {
+            let defaults = UserDefaults(suiteName: "FirstFocusTests-\(UUID().uuidString)")!
+            defaults.set([home, work, muse], forKey: "focusListSeenListIds")
+            defaults.set([home, work], forKey: "focusListTickedListIds")
+            let preference = FocusListPreference(defaults: defaults)
+            try expect(preference.untickedListIds == [muse])
+            preference.untickedListIds = []
+            try expect(preference.untickedListIds.isEmpty, "once written, the old record is no longer read")
         }
 
         r.run("a reminder with a Priority in an unticked list stays put and keeps its Priority") {
@@ -300,14 +307,14 @@ func registerFocusListTests(_ runner: TestRunner) {
             try expect(priority(of: "a", in: h.taskSource) == .high)
         }
 
-        r.run("a deleted list is forgotten, and one made again with its title starts unticked") {
+        r.run("a deleted list is forgotten, and one made again with its title starts ticked") {
             let h = await MainActor.run { makeHarness([]) }
+            await MainActor.run { h.focusList.setTicked(false, listId: work) }
             await sync(h)
             h.taskSource.removeList(id: work)
             h.taskSource.addList(id: "work-again", title: "Work")
             await sync(h)
-            try expect(h.preference.seenListIds == [home, "work-again"])
-            try expect(h.preference.tickedListIds == [home])
+            try expect(h.preference.untickedListIds.isEmpty)
         }
 
         r.run("the ticks survive turning the setting off and on") {
@@ -316,15 +323,15 @@ func registerFocusListTests(_ runner: TestRunner) {
             await sync(h)
             await MainActor.run { h.focusList.isEnabled = true }
             await sync(h)
-            try expect(h.preference.tickedListIds == [home, work])
+            try expect(h.preference.untickedListIds == [muse])
             try expect(list(of: "a", in: h.taskSource) == muse)
         }
 
-        r.run("nothing is recorded while Reminders is Unavailable") {
-            let h = await MainActor.run { makeHarness([task("a", priority: .high, list: work)]) }
+        r.run("nothing is forgotten while Reminders is Unavailable") {
+            let h = await MainActor.run { makeHarness([task("a", priority: .high, list: work)], withMuse: true) }
             h.taskSource.gateAvailability = .unavailable
             await sync(h)
-            try expect(h.preference.seenListIds == nil)
+            try expect(h.preference.untickedListIds == [muse])
             try expect(list(of: "a", in: h.taskSource) == work)
         }
     }
@@ -469,6 +476,45 @@ func registerFocusListTests(_ runner: TestRunner) {
             await MainActor.run { model.setFocusListTick(true, listId: work) }
             await model.focusListSettled()
             try expect(list(of: "a", in: taskSource) == listId)
+        }
+
+        r.run("an unticked list's reminders leave the window, even with the Focus list off, and return when ticked") {
+            let done = CheckedOffReminder(task: task("d", list: work), checkedOffAt: Date())
+            let taskSource = FakeTaskSource(
+                tasks: [task("a", priority: .high, list: work), task("b", priority: .high, list: home)], checkedOff: [done]
+            )
+            taskSource.addList(id: work, title: "Work")
+            taskSource.addList(id: home, title: "Reminders")
+            taskSource.defaultList = home
+            let preference = FocusListPreference(defaults: UserDefaults(suiteName: "FirstFocusTests-\(UUID().uuidString)")!)
+            preference.isEnabled = false
+            let model = await MainActor.run { makeModel(taskSource, preference) }
+            await model.start()
+            try await MainActor.run {
+                try expect(Set(model.rankedList.focus.map(\.id)) == ["a", "b"])
+                try expect(model.checkedOff.map(\.id) == ["d"])
+            }
+
+            await MainActor.run { model.setFocusListTick(false, listId: work) }
+            try await MainActor.run {
+                try expect(model.rankedList.focus.map(\.id) == ["b"], "Work's reminder is gone from Focus")
+                try expect(model.checkedOff.isEmpty, "and from the Checked Off sheet")
+            }
+
+            await MainActor.run { model.setFocusListTick(true, listId: work) }
+            try await MainActor.run { try expect(Set(model.rankedList.focus.map(\.id)) == ["a", "b"]) }
+        }
+
+        r.run("a list unticked in an earlier launch is still hidden at start") {
+            let taskSource = FakeTaskSource(tasks: [task("a", priority: .high, list: work)])
+            taskSource.addList(id: work, title: "Work")
+            let preference = FocusListPreference(defaults: UserDefaults(suiteName: "FirstFocusTests-\(UUID().uuidString)")!)
+            preference.untickedListIds = [work]
+            let model = await MainActor.run { makeModel(taskSource, preference) }
+            await model.start()
+            await model.focusListSettled()
+            try await MainActor.run { try expect(model.rankedList.focus.isEmpty && model.rankedList.later.isEmpty) }
+            try expect(list(of: "a", in: taskSource) == work, "and the Focus list leaves it alone")
         }
 
         r.run("a Move to Later from the window takes the reminder out") {

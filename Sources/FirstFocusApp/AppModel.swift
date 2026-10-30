@@ -533,6 +533,7 @@ public final class AppModel: ObservableObject {
         if remindersOut != remindersUnavailable { remindersUnavailable = remindersOut }
         let messagesOut = intakeRunner.messagesUnavailable
         if messagesOut != messagesNeedFullDiskAccess { messagesNeedFullDiskAccess = messagesOut }
+        board.hiddenListIds = focusList.untickedListIds
         rankedList = board.rankedList(now: rankedAt, hiding: hidingIDs)
         checkedOff = board.checkedOff(now: rankedAt, hiding: hidingIDs)
         checkedOffCount = checkedOff.count
@@ -553,9 +554,11 @@ public final class AppModel: ObservableObject {
         focusListTicks = await focusList.lists()
     }
 
-    /// Ticks or unticks a list in Advanced.
+    /// Ticks or unticks a list in Advanced: an unticked list's reminders
+    /// leave the window at once, and come back when it is ticked.
     public func setFocusListTick(_ isTicked: Bool, listId: String) {
         focusList.setTicked(isTicked, listId: listId)
+        republish()
         focusListTicks = focusListTicks.map {
             $0.id == listId ? FocusListTick(list: $0.list, isTicked: isTicked) : $0
         }
