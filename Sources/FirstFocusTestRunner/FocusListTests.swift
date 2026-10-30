@@ -517,6 +517,18 @@ func registerFocusListTests(_ runner: TestRunner) {
             try expect(list(of: "a", in: taskSource) == work, "and the Focus list leaves it alone")
         }
 
+        r.run("the ticks Advanced shows are the stored record, not a copy AppModel keeps") {
+            let taskSource = FakeTaskSource(tasks: [])
+            taskSource.addList(id: work, title: "Work")
+            taskSource.addList(id: home, title: "Reminders")
+            let preference = FocusListPreference(defaults: UserDefaults(suiteName: "FirstFocusTests-\(UUID().uuidString)")!)
+            let model = await MainActor.run { makeModel(taskSource, preference) }
+            await model.refreshFocusListTicks()
+            preference.untickedListIds = [work]
+            let ticks = await MainActor.run { model.focusListTicks.map { "\($0.list.title):\($0.isTicked)" } }
+            try expect(ticks == ["Reminders:true", "Work:false"], "got \(ticks)")
+        }
+
         r.run("a Move to Later from the window takes the reminder out") {
             let taskSource = FakeTaskSource(tasks: [task("a", priority: .high, list: work)])
             taskSource.addList(id: work, title: "Work")

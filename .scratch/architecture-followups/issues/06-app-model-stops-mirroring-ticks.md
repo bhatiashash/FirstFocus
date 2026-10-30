@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Unticking and ticking a list in Advanced still updates the checkbox, the list in the window and the Focus list.
-- [ ] AppModel holds no separate copy of the ticks.
-- [ ] Existing Focus list tests pass.
+- [x] Unticking and ticking a list in Advanced still updates the checkbox, the list in the window and the Focus list.
+- [x] AppModel holds no separate copy of the ticks.
+- [x] Existing Focus list tests pass.

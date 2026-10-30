@@ -95,15 +95,23 @@ public final class FocusList {
         }
     }
 
-    /// Every Reminders list but the Focus list, by title, and whether it is
-    /// ticked. A list made after you last looked reads as ticked.
-    public func lists() async -> [FocusListTick] {
+    /// Every Reminders list but the Focus list, by title.
+    public func reminderLists() async -> [ReminderList] {
         let taskSource = self.taskSource
-        let lists = await Task.detached { taskSource.reminderLists() }.value
+        return await Task.detached { taskSource.reminderLists() }.value
             .filter { $0.id != preference.listId }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-        let unticked = preference.untickedListIds
-        return lists.map { FocusListTick(list: $0, isTicked: !unticked.contains($0.id)) }
+    }
+
+    /// Every Reminders list but the Focus list, and whether it is ticked. A
+    /// list made after you last looked reads as ticked.
+    public func lists() async -> [FocusListTick] {
+        await reminderLists().map { FocusListTick(list: $0, isTicked: isTicked($0.id)) }
+    }
+
+    /// Whether `listId` is ticked.
+    public func isTicked(_ listId: String) -> Bool {
+        !preference.untickedListIds.contains(listId)
     }
 
     /// The lists you unticked. The window hides their reminders.

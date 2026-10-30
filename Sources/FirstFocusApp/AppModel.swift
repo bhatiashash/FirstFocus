@@ -196,9 +196,14 @@ public final class AppModel: ObservableObject {
     @Published public var isFocusListEnabled: Bool {
         didSet { focusList.isEnabled = isFocusListEnabled }
     }
-    /// The Reminders lists the Focus list can draw from, with their ticks,
-    /// as of the last `refreshFocusListTicks()`.
-    @Published public private(set) var focusListTicks: [FocusListTick] = []
+    /// The Reminders lists Advanced shows, as of the last
+    /// `refreshFocusListTicks()`. Which are ticked is the Focus list's.
+    @Published private var reminderLists: [ReminderList] = []
+    /// Each list and whether it is ticked, read from the Focus list every
+    /// time, so no copy of the ticks can go stale.
+    public var focusListTicks: [FocusListTick] {
+        reminderLists.map { FocusListTick(list: $0, isTicked: focusList.isTicked($0.id)) }
+    }
     /// Held directly, alongside handing the same instance to `board` at
     /// init, purely for `start()`'s one-time Gate request — requesting
     /// access is a launch-time action, not part of reading or ranking, so
@@ -590,17 +595,15 @@ public final class AppModel: ObservableObject {
 
     /// Reads Reminders' lists again, for Advanced as it opens.
     public func refreshFocusListTicks() async {
-        focusListTicks = await focusList.lists()
+        reminderLists = await focusList.reminderLists()
     }
 
     /// Ticks or unticks a list in Advanced: an unticked list's reminders
     /// leave the window at once, and come back when it is ticked.
     public func setFocusListTick(_ isTicked: Bool, listId: String) {
         focusList.setTicked(isTicked, listId: listId)
+        objectWillChange.send()
         republish()
-        focusListTicks = focusListTicks.map {
-            $0.id == listId ? FocusListTick(list: $0.list, isTicked: isTicked) : $0
-        }
     }
 
     /// The Morning Brief's text (ADR 0046), from the Ranked List derived
