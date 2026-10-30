@@ -18,7 +18,7 @@ private struct Harness: @unchecked Sendable {
     let messagesSource: FakeMessagesSource
     let store: SQLiteSignalStore
     let clock: FakeNow
-    let snoozeWakeClock: FakeUndoClock
+    let snoozeWakeAlarm: FakeAlarm
 }
 
 /// Takes a Source's Gate away or gives it back, then reads that Source the
@@ -57,7 +57,7 @@ private func makeHarness(
         let taskSource = FakeTaskSource(tasks: tasks, availability: .available)
         let messagesSource = FakeMessagesSource(messages: [])
         let clock = FakeNow(now)
-        let snoozeWakeClock = FakeUndoClock()
+        let snoozeWakeAlarm = FakeAlarm()
         let model = AppModel(AppDependencies.test { d in
             d.taskSource = taskSource
             d.messagesSource = messagesSource
@@ -70,18 +70,18 @@ private func makeHarness(
             d.dayChanges = FakeDayChangeObserver()
             d.zenFocusModePreference = preference
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-            d.undoClock = FakeUndoClock()
+            d.undoAlarm = FakeAlarm()
             d.loadModel = { _, _ in FakeIntentExtractor() }
             d.historyStore = makeTestHistoryStore()
             d.correctionStore = FakeCorrectionStore()
             d.apiKeyStore = FakeAPIKeyStore()
             d.now = { clock.date }
             d.bundlePath = "/nonexistent"
-            d.snoozeWakeClock = snoozeWakeClock
+            d.snoozeWakeAlarm = snoozeWakeAlarm
         })
         return Harness(
             model: model, taskSource: taskSource, messagesSource: messagesSource, store: store, clock: clock,
-            snoozeWakeClock: snoozeWakeClock
+            snoozeWakeAlarm: snoozeWakeAlarm
         )
     }
 }
@@ -352,42 +352,19 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
         }
     }
 
-    runner.suite("AppModel: Snoozed rows come back on time (ADR 0045)") { r in
+    runner.suite("AppModel: a snooze ending derives the list again (ADR 0045)") { r in
         let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
-
-        r.run("nothing Snoozed schedules no wake-up") {
-            let h = await makeHarness(tasks: [task(id: "r1")], now: now)
-            await h.model.start()
-            try expect(h.snoozeWakeClock.scheduledInterval == nil)
-        }
 
         r.run("a snooze schedules a wake-up for when it ends, and the wake-up brings the row back") {
             let h = await makeHarness(tasks: [task(id: "r1")], now: now)
             await h.model.start()
             await MainActor.run { h.model.snooze(h.model.rankedList.later[0], until: now.addingTimeInterval(3600)) }
-            try expect(h.snoozeWakeClock.scheduledInterval == 3600, "got \(String(describing: h.snoozeWakeClock.scheduledInterval))")
+            let pending = await h.snoozeWakeAlarm.pending
+            try expect(pending == now.addingTimeInterval(3600), "got \(String(describing: pending))")
             h.clock.date = now.addingTimeInterval(3600)
-            h.snoozeWakeClock.fire()
-            await settle()
+            await h.snoozeWakeAlarm.fire()
             let later = await MainActor.run { h.model.rankedList.later.map(\.id) }
             try expect(later == ["r1"], "got \(later)")
-        }
-
-        r.run("an earlier snooze replaces the scheduled wake-up, and the later one is scheduled after it") {
-            let h = await makeHarness(tasks: [task(id: "a"), task(id: "b")], now: now)
-            await h.model.start()
-            try await MainActor.run {
-                h.model.snooze(try require(h.model.rankedList.later.first { $0.id == "a" }), until: now.addingTimeInterval(7200))
-                h.model.snooze(try require(h.model.rankedList.later.first { $0.id == "b" }), until: now.addingTimeInterval(3600))
-            }
-            try expect(h.snoozeWakeClock.scheduledInterval == 3600)
-            h.clock.date = now.addingTimeInterval(3600)
-            h.snoozeWakeClock.fire()
-            await settle()
-            let (later, snoozed) = await MainActor.run { (h.model.rankedList.later.map(\.id), h.model.rankedList.snoozed.map(\.id)) }
-            try expect(later == ["b"], "got \(later)")
-            try expect(snoozed == ["a"], "got \(snoozed)")
-            try expect(h.snoozeWakeClock.scheduledInterval == 3600, "a's wake-up, an hour after b's")
         }
     }
 

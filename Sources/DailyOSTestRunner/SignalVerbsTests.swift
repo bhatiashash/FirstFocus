@@ -2,7 +2,7 @@ import DailyOSCore
 import Foundation
 
 // signal-verbs: every verb and its Undo, driven through `SignalVerbs`
-// against `FakeTaskSource`, a test SQLite store and a fake Undo clock.
+// against `FakeTaskSource`, a test SQLite store and a fake Undo alarm.
 // No AppModel and no sleeps.
 
 private func reminder(_ id: String, title: String? = nil, priority: Priority = .none) -> ReminderTask {
@@ -26,9 +26,10 @@ private final class Recorder {
 private struct Harness: @unchecked Sendable {
     let verbs: SignalVerbs
     let board: SignalBoard
+    let snoozes: Snoozes
     let taskSource: FakeTaskSource
     let store: SQLiteSignalStore
-    let clock: FakeUndoClock
+    let clock: FakeAlarm
     let recorder: Recorder
 }
 
@@ -40,10 +41,11 @@ private func makeHarness(_ tasks: [ReminderTask] = [], suggestions: [Signal] = [
     let taskSource = FakeTaskSource(tasks: tasks)
     let store = makeTestSignalStore()
     if !suggestions.isEmpty { try store.recordOneMessageBatch("m1", signals: suggestions) }
-    let board = SignalBoard(taskSource: taskSource, signalStore: store, now: { now })
-    let clock = FakeUndoClock()
+    let snoozes = Snoozes(store: store, now: { now })
+    let board = SignalBoard(taskSource: taskSource, signalStore: store, now: { now }, snoozes: snoozes)
+    let clock = FakeAlarm()
     let verbs = SignalVerbs(
-        board: board, taskSource: taskSource, signalStore: store, undoClock: clock, undoWindow: 5, now: { now }
+        board: board, snoozes: snoozes, taskSource: taskSource, signalStore: store, undoAlarm: clock, undoWindow: 5, now: { now }
     )
     let recorder = Recorder()
     verbs.notForMe = SignalVerbs.NotForMe(
@@ -55,14 +57,12 @@ private func makeHarness(_ tasks: [ReminderTask] = [], suggestions: [Signal] = [
         undo: { recorder.undone.append($0.id) }
     )
     board.loadStoredMessages()
-    return Harness(verbs: verbs, board: board, taskSource: taskSource, store: store, clock: clock, recorder: recorder)
+    return Harness(verbs: verbs, board: board, snoozes: snoozes, taskSource: taskSource, store: store, clock: clock, recorder: recorder)
 }
 
-/// The fake clock's actions hop to the main actor, as production's do.
-/// Queued behind them, this returns once they have run.
+/// The Undo bar's window running out.
 private func afterTimers(_ h: Harness) async {
-    h.clock.fire()
-    await MainActor.run {}
+    await h.clock.fire()
 }
 
 @MainActor
@@ -103,7 +103,7 @@ func registerSignalVerbsTests(_ runner: TestRunner) {
             await h.verbs.settled()
             try await MainActor.run {
                 try expect(h.taskSource.completedIds == ["r1"])
-                try expect(h.board.snoozes.until(signalId: "r1") == nil, "ADR 0045")
+                try expect(h.snoozes.until(signalId: "r1") == nil, "ADR 0045")
                 try expect(h.verbs.hiddenIDs.isEmpty)
                 try expect(h.verbs.currentOffer == nil)
             }
@@ -120,7 +120,7 @@ func registerSignalVerbsTests(_ runner: TestRunner) {
             }
             _ = await h.verbs.undo()
             await afterTimers(h)
-            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "r1") == until) }
+            try await MainActor.run { try expect(h.snoozes.until(signalId: "r1") == until) }
         }
 
         r.run("a new offer writes a held-back check-off first") {
@@ -183,12 +183,12 @@ func registerSignalVerbsTests(_ runner: TestRunner) {
             let signal = await MainActor.run { list(h).suggested[0] }
             let reminderId = try require(await h.verbs.approve(signal, snoozing: .tomorrow))
             try await MainActor.run {
-                try expect(h.board.snoozes.until(signalId: reminderId) != nil)
+                try expect(h.snoozes.until(signalId: reminderId) != nil)
                 try expect(list(h).focus.isEmpty && list(h).later.isEmpty, "it never shows in Focus or Later")
             }
             _ = await h.verbs.undo()
             try await MainActor.run {
-                try expect(h.board.snoozes.until(signalId: reminderId) == nil)
+                try expect(h.snoozes.until(signalId: reminderId) == nil)
                 try expect(h.taskSource.tasks.isEmpty)
                 try expect(list(h).suggested.map(\.id) == ["s1"])
             }
@@ -226,7 +226,7 @@ func registerSignalVerbsTests(_ runner: TestRunner) {
             let broughtBack = await h.verbs.undo()
             try await MainActor.run {
                 try expect(broughtBack == nil)
-                try expect(h.board.snoozes.until(signalId: "r1") == nil)
+                try expect(h.snoozes.until(signalId: "r1") == nil)
             }
         }
 
@@ -240,7 +240,7 @@ func registerSignalVerbsTests(_ runner: TestRunner) {
                 h.verbs.snooze(row, .nextWeek)
             }
             _ = await h.verbs.undo()
-            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "r1") == earlier) }
+            try await MainActor.run { try expect(h.snoozes.until(signalId: "r1") == earlier) }
         }
 
         r.run("Undo with nothing showing does nothing") {

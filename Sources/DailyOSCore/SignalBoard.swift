@@ -23,8 +23,9 @@ public final class SignalBoard {
     private let taskSource: any TaskSource
     private let signalStore: any SignalBoardStore
     /// Every way a snooze starts and ends. The Board reads snoozes through
-    /// it and tells it about each Reminders fetch.
-    public let snoozes: Snoozes
+    /// it and tells it about each Reminders fetch. The caller builds it and
+    /// hands the same one to everything else that snoozes (snooze-wake).
+    private let snoozes: Snoozes
 
     private var reminderSignals: [Signal] = []
     private var messageSignals: [Signal] = []
@@ -48,11 +49,11 @@ public final class SignalBoard {
 
     public init(
         taskSource: any TaskSource, signalStore: any SignalBoardStore & SnoozeStore,
-        now: @escaping @MainActor () -> Date = { Date() }
+        now: @escaping @MainActor () -> Date = { Date() }, snoozes: Snoozes
     ) {
         self.taskSource = taskSource
         self.signalStore = signalStore
-        self.snoozes = Snoozes(store: signalStore)
+        self.snoozes = snoozes
         self.now = now
     }
 

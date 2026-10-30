@@ -22,7 +22,7 @@ public struct AppDependencies {
     public var focusListPreference: FocusListPreference
     public var extractionSettings: ExtractionSettings
     public var reExtractionSettings: ReExtractionSettings
-    public var undoClock: any UndoClock
+    public var undoAlarm: any Alarm
     public var undoWindow: TimeInterval
     /// How the extraction model loads: the llama.cpp model from disk in
     /// the app, a fake in tests, so a test never reads a real model.
@@ -35,13 +35,15 @@ public struct AppDependencies {
     public var apiKeyStore: any APIKeyStore
     public var makeScreener: @Sendable (String) -> any Screener
     public var ruleStore: any RuleStore
-    public var batchWakeClock: any UndoClock
+    public var batchWakeAlarm: any Alarm
     public var auditRoll: @Sendable () -> Double
     /// "Now", injected so a test can stand just before midnight.
     public var now: @MainActor () -> Date
     /// Feeds `MessagesIntake`'s signing-identity check (ticket 10).
     public var bundlePath: String
-    public var snoozeWakeClock: any UndoClock
+    public var snoozeWakeAlarm: any Alarm
+    /// The Morning Brief's daily send (ADR 0046).
+    public var morningBriefAlarm: any Alarm
 
     public init(
         taskSource: any TaskSource, messagesSource: any MessagesSource, signalStore: any SignalStore,
@@ -50,12 +52,12 @@ public struct AppDependencies {
         foregroundObserver: any ForegroundObserver, dayChanges: any DayChangeObserver,
         zenFocusModePreference: ZenFocusModePreference, captureHotkeyPreference: CaptureHotkeyPreference,
         focusListPreference: FocusListPreference, extractionSettings: ExtractionSettings,
-        reExtractionSettings: ReExtractionSettings, undoClock: any UndoClock, undoWindow: TimeInterval,
+        reExtractionSettings: ReExtractionSettings, undoAlarm: any Alarm, undoWindow: TimeInterval,
         loadModel: @escaping ExtractionHost.Loader, historyStore: any HistoryStore, participantLabelStore: any ParticipantLabelStore,
         correctionStore: any CorrectionStore, screeningSettings: ScreeningSettings, filteredSMSSettings: FilteredSMSSettings,
         apiKeyStore: any APIKeyStore, makeScreener: @escaping @Sendable (String) -> any Screener, ruleStore: any RuleStore,
-        batchWakeClock: any UndoClock, auditRoll: @escaping @Sendable () -> Double, now: @escaping @MainActor () -> Date,
-        bundlePath: String, snoozeWakeClock: any UndoClock
+        batchWakeAlarm: any Alarm, auditRoll: @escaping @Sendable () -> Double, now: @escaping @MainActor () -> Date,
+        bundlePath: String, snoozeWakeAlarm: any Alarm, morningBriefAlarm: any Alarm
     ) {
         self.taskSource = taskSource
         self.messagesSource = messagesSource
@@ -72,7 +74,7 @@ public struct AppDependencies {
         self.focusListPreference = focusListPreference
         self.extractionSettings = extractionSettings
         self.reExtractionSettings = reExtractionSettings
-        self.undoClock = undoClock
+        self.undoAlarm = undoAlarm
         self.undoWindow = undoWindow
         self.loadModel = loadModel
         self.historyStore = historyStore
@@ -83,11 +85,12 @@ public struct AppDependencies {
         self.apiKeyStore = apiKeyStore
         self.makeScreener = makeScreener
         self.ruleStore = ruleStore
-        self.batchWakeClock = batchWakeClock
+        self.batchWakeAlarm = batchWakeAlarm
         self.auditRoll = auditRoll
         self.now = now
         self.bundlePath = bundlePath
-        self.snoozeWakeClock = snoozeWakeClock
+        self.snoozeWakeAlarm = snoozeWakeAlarm
+        self.morningBriefAlarm = morningBriefAlarm
     }
 
     /// The shipped app: the real Sources, and every store at the bundle's
@@ -114,7 +117,7 @@ public struct AppDependencies {
             focusListPreference: FocusListPreference(),
             extractionSettings: ExtractionSettings(),
             reExtractionSettings: ReExtractionSettings(),
-            undoClock: TaskSleepUndoClock(),
+            undoAlarm: WallClockAlarm(),
             undoWindow: 5,
             loadModel: llamaExtractorLoader,
             historyStore: SQLiteHistoryStore(path: SQLiteHistoryStore.defaultPath(bundleIdentifier: bundleIdentifier)),
@@ -127,11 +130,12 @@ public struct AppDependencies {
             apiKeyStore: KeychainAPIKeyStore(service: bundleIdentifier),
             makeScreener: { JEVScreener(apiKey: $0) },
             ruleStore: SQLiteRuleStore(path: SQLiteRuleStore.defaultPath(bundleIdentifier: bundleIdentifier)),
-            batchWakeClock: TaskSleepUndoClock(),
+            batchWakeAlarm: WallClockAlarm(),
             auditRoll: { Double.random(in: 0..<1) },
             now: { Date() },
             bundlePath: Bundle.main.bundlePath,
-            snoozeWakeClock: TaskSleepUndoClock()
+            snoozeWakeAlarm: WallClockAlarm(),
+            morningBriefAlarm: WallClockAlarm()
         )
     }
 }

@@ -121,16 +121,13 @@ func registerExtractionHostTests(_ runner: TestRunner) {
             try expect(status == .noModel)
         }
 
-        r.run("a running pass or re-extraction holds a proposal back (ADR 0034)") {
+        // A running pass holding proposals back is tested on the runner,
+        // which runs passes (IntakeRunnerTests).
+        r.run("with five new Corrections and a model, a proposal is ready") {
             let extraction = await MainActor.run { TestExtraction(corrections: falsePositives(5)) }
             await extraction.host.load()
-            try await MainActor.run {
-                try expect(extraction.host.ruleProposalStatus() == .ready(newCorrections: 5))
-                extraction.host.isPassRunning = { true }
-                try expect(extraction.host.ruleProposalStatus() == .passRunning)
-            }
-            let proposed = await extraction.host.proposeRules()
-            try expect(proposed.isEmpty)
+            let status = await MainActor.run { extraction.host.ruleProposalStatus() }
+            try expect(status == .ready(newCorrections: 5))
         }
 
         r.run("a proposal that produced Rules uses the Corrections up; an empty one doesn't") {

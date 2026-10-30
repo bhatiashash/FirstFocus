@@ -15,7 +15,7 @@ private struct Harness: @unchecked Sendable {
     let model: AppModel
     let taskSource: FakeTaskSource
     let store: SQLiteSignalStore
-    let undoClock: FakeUndoClock
+    let undoAlarm: FakeAlarm
     let dayChanges: FakeDayChangeObserver
     let clock: FakeNow
 }
@@ -31,7 +31,7 @@ private func makeHarness(
         let store = makeTestSignalStore()
         try? store.markBackfillComplete()
         let taskSource = FakeTaskSource(tasks: tasks, checkedOff: checkedOff, availability: reminders)
-        let undoClock = FakeUndoClock()
+        let undoAlarm = FakeAlarm()
         let dayChanges = FakeDayChangeObserver()
         let clock = FakeNow(now)
         let model = AppModel(AppDependencies.test { d in
@@ -46,7 +46,7 @@ private func makeHarness(
             d.dayChanges = dayChanges
             d.zenFocusModePreference = preference
             d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-            d.undoClock = undoClock
+            d.undoAlarm = undoAlarm
             d.loadModel = { _, _ in FakeIntentExtractor() }
             d.historyStore = makeTestHistoryStore()
             d.correctionStore = FakeCorrectionStore()
@@ -54,7 +54,7 @@ private func makeHarness(
             d.now = { clock.date }
             d.bundlePath = "/nonexistent"
         })
-        return Harness(model: model, taskSource: taskSource, store: store, undoClock: undoClock, dayChanges: dayChanges, clock: clock)
+        return Harness(model: model, taskSource: taskSource, store: store, undoAlarm: undoAlarm, dayChanges: dayChanges, clock: clock)
     }
 }
 
@@ -214,7 +214,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
             let h = await makeHarness(tasks: [task(id: "r1")], now: now)
             await h.model.start()
             await MainActor.run { h.model.checkOff(h.model.rankedList.focus.first { $0.id == "r1" }!) }
-            h.undoClock.fire()
+            await h.undoAlarm.fire()
             await settle()
             let (ids, focus) = try await MainActor.run { (try checkedOffIds(h.model), h.model.rankedList.focus.map(\.id)) }
             try expect(ids == ["r1"], "got \(String(describing: ids))")
@@ -226,8 +226,7 @@ func registerCheckedOffTests(_ runner: TestRunner) {
             await h.model.start()
             await MainActor.run { h.model.checkOff(h.model.rankedList.focus.first { $0.id == "r1" }!) }
             await h.model.undo()
-            h.undoClock.fire()
-            await settle()
+            await h.undoAlarm.fire()
             let (ids, focus) = try await MainActor.run { (try checkedOffIds(h.model), h.model.rankedList.focus.map(\.id)) }
             try expect(ids == nil, "got \(String(describing: ids))")
             try expect(focus == ["r1"], "got \(focus)")

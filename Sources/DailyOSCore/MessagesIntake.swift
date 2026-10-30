@@ -66,7 +66,9 @@ public final class MessagesIntake {
     /// Injected rather than read from `Bundle.main` inside, so a test can
     /// drive `identityMismatch()` at all.
     private let bundlePath: String
-    private let batchWakeClock: (any UndoClock)?
+    /// Wakes Intake when the Batch a pass left open closes. At most one
+    /// wake-up is pending: the next pass replaces it.
+    private let batchWakeAlarm: (any Alarm)?
     /// Rolls the Audit Sample (ADR 0039); injected so tests can fix it.
     private let auditRoll: @Sendable () -> Double
     /// Advanced's Ignore Filtered SMS toggle, read for each Batch.
@@ -77,9 +79,6 @@ public final class MessagesIntake {
     /// through its usual path, so the wake-up joins or follows a running
     /// pass exactly as a chat.db write would (ADR 0034).
     public var onBatchDue: (@MainActor @Sendable () -> Void)?
-    /// Bumped on every scheduled wake-up, so only the newest one fires:
-    /// at most one is ever pending.
-    private var wakeGeneration = 0
 
     public init(
         messagesSource: any MessagesSource,
@@ -90,7 +89,7 @@ public final class MessagesIntake {
         historyStore: (any HistoryStore)? = nil,
         correctionStore: (any CorrectionExamples)? = nil,
         extractor: (any IntentExtractor)? = nil,
-        batchWakeClock: (any UndoClock)? = nil,
+        batchWakeAlarm: (any Alarm)? = nil,
         auditRoll: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) },
         ignoresFilteredSMS: @escaping @Sendable () -> Bool = { false }
     ) {
@@ -102,7 +101,7 @@ public final class MessagesIntake {
         self.historyStore = historyStore
         self.correctionStore = correctionStore
         self.extractor = extractor
-        self.batchWakeClock = batchWakeClock
+        self.batchWakeAlarm = batchWakeAlarm
         self.auditRoll = auditRoll
         self.ignoresFilteredSMS = ignoresFilteredSMS
     }
@@ -448,17 +447,16 @@ public final class MessagesIntake {
     /// the pending one is simply dropped. The 60-second poll stays as the
     /// backstop if a wake-up is ever lost.
     private func scheduleWakeUp(at closingAt: Date?, now: Date, passStartedAt: Date) {
-        wakeGeneration += 1
-        guard let closingAt, let batchWakeClock else { return }
-        let generation = wakeGeneration
-        // `now` is when the pass began; take off the time the pass has
-        // since spent in the model, so the wake-up isn't late by that much.
-        let delay = closingAt.timeIntervalSince(now) - Date().timeIntervalSince(passStartedAt)
-        batchWakeClock.scheduleOnce(after: max(0, delay)) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.wakeGeneration == generation else { return }
-                self.onBatchDue?()
-            }
+        guard let batchWakeAlarm else { return }
+        guard let closingAt else {
+            batchWakeAlarm.cancel()
+            return
+        }
+        // `now` is the moment the pass judged against; the Batch closes
+        // that long after the pass started, however long it then spent in
+        // the model.
+        batchWakeAlarm.schedule(at: passStartedAt.addingTimeInterval(closingAt.timeIntervalSince(now))) { [weak self] in
+            self?.onBatchDue?()
         }
     }
 }

@@ -27,7 +27,7 @@ struct HistoryApp: @unchecked Sendable {
     let correctionsPath: String
     let taskSource: FakeTaskSource
     /// Closes the Undo bar's window when a test fires it.
-    let undoClock: FakeUndoClock
+    let undoAlarm: FakeAlarm
     /// The app's Screening settings, which History's view model shares
     /// unless a test passes its own.
     let screeningSettings: ScreeningSettings
@@ -73,7 +73,7 @@ func makeHistoryApp(
     let correctionsPath = testStorePath()
     let corrections = SQLiteCorrectionStore(path: correctionsPath)
     let taskSource = FakeTaskSource(tasks: [], availability: .available)
-    let undoClock = FakeUndoClock()
+    let undoAlarm = FakeAlarm()
     // Screening's toggle on unless a test says otherwise, so History shows
     // Screening; with no screener there's no key, so intake stays local.
     let screeningSettings = screeningSettings ?? {
@@ -92,7 +92,7 @@ func makeHistoryApp(
         d.foregroundObserver = FakeForegroundObserver()
         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
         d.reExtractionSettings = ReExtractionSettings(defaults: defaults)
-        d.undoClock = undoClock
+        d.undoAlarm = undoAlarm
         d.loadModel = { _, _ in extractor }
         d.historyStore = history
         d.correctionStore = corrections
@@ -104,7 +104,7 @@ func makeHistoryApp(
     })
     return HistoryApp(
         model: model, signals: signals, history: history, corrections: corrections, correctionsPath: correctionsPath,
-        taskSource: taskSource, undoClock: undoClock, screeningSettings: screeningSettings
+        taskSource: taskSource, undoAlarm: undoAlarm, screeningSettings: screeningSettings
     )
 }
 

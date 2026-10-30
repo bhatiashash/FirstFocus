@@ -77,12 +77,17 @@ public final class UndoBar {
     public private(set) var current: UndoOffer?
     private var kind: Kind?
     private var token = 0
-    private let clock: any UndoClock
+    /// Ends the offer showing when its window runs out. Scheduling a new
+    /// offer replaces the last one's, so a late window never ends a newer
+    /// offer.
+    private let alarm: any Alarm
     private let window: TimeInterval
+    private let now: @MainActor () -> Date
 
-    public init(clock: any UndoClock = TaskSleepUndoClock(), window: TimeInterval = 5) {
-        self.clock = clock
+    public init(alarm: any Alarm, window: TimeInterval = 5, now: @escaping @MainActor () -> Date = { Date() }) {
+        self.alarm = alarm
         self.window = window
+        self.now = now
     }
 
     /// The id a held-back offer keeps off the Ranked List.
@@ -100,16 +105,12 @@ public final class UndoBar {
         current = UndoOffer(action: action, label: label, token: token)
         self.kind = kind
         onChange()
-        let token = self.token
-        clock.scheduleOnce(after: window) { [weak self] in
-            Task { @MainActor in self?.expire(token) }
-        }
+        alarm.schedule(at: now().addingTimeInterval(window)) { [weak self] in self?.expire() }
     }
 
-    /// The window of the offer `token` named has run out. A no-op once
-    /// that offer is gone, so a late timer never ends a newer one.
-    private func expire(_ token: Int) {
-        guard token == self.token, current != nil else { return }
+    /// The offer's window has run out.
+    private func expire() {
+        guard current != nil else { return }
         commitHeldBack()
         clear()
     }
@@ -146,6 +147,7 @@ public final class UndoBar {
     }
 
     private func clear() {
+        alarm.cancel()
         current = nil
         kind = nil
         onChange()

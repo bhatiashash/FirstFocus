@@ -30,6 +30,7 @@ public final class SignalVerbs {
     public var notForMe: NotForMe?
 
     private let board: SignalBoard
+    private let snoozes: Snoozes
     private let undoBar: UndoBar
     private let checkOffs: CheckOffCoordinator
     private let now: @MainActor () -> Date
@@ -41,11 +42,12 @@ public final class SignalVerbs {
     private var bringsBack: String?
 
     public init(
-        board: SignalBoard, taskSource: any TaskSource, signalStore: any CheckOffStore,
-        undoClock: any UndoClock, undoWindow: TimeInterval, now: @escaping @MainActor () -> Date = { Date() }
+        board: SignalBoard, snoozes: Snoozes, taskSource: any TaskSource, signalStore: any CheckOffStore,
+        undoAlarm: any Alarm, undoWindow: TimeInterval, now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.board = board
-        self.undoBar = UndoBar(clock: undoClock, window: undoWindow)
+        self.snoozes = snoozes
+        self.undoBar = UndoBar(alarm: undoAlarm, window: undoWindow, now: now)
         self.checkOffs = CheckOffCoordinator(taskSource: taskSource, signalStore: signalStore)
         self.now = now
         undoBar.onChange = { [weak self] in self?.onChange() }
@@ -103,7 +105,7 @@ public final class SignalVerbs {
     /// (ADR 0045).
     public func checkOff(_ signal: Signal) {
         offer(.checkedOff, label: signal.label, .heldBack(hiding: signal.id) { [weak self] in
-            self?.board.snoozes.end(signalId: signal.id)
+            self?.snoozes.end(signalId: signal.id)
             self?.checkOffs.commit(signal)
         })
     }
@@ -182,31 +184,26 @@ public final class SignalVerbs {
 
     /// Snoozes `signal` until `until` (CONTEXT.md: Snoozed). No Undo bar.
     public func snooze(_ signal: Signal, until: Date) {
-        board.snoozes.snooze(signal, until: until)
+        snoozes.snooze(signal, until: until)
         onChange()
     }
 
     /// Tomorrow or Next Week from a row (ADR 0045): ends at 8:00 AM.
     /// Undo puts back whatever snooze the row had before, or none.
     public func snooze(_ signal: Signal, _ choice: SnoozeChoice) {
-        let previous = board.snoozes.until(signalId: signal.id)
         let until = snoozeEnd(choice, now: now())
-        snooze(signal, until: until)
+        let previous = snoozes.snooze(signal, until: until)
+        onChange()
         offer(.snoozed(until: until), label: signal.label, .reversible { [weak self] in
-            guard let self else { return }
-            if let previous {
-                self.board.snoozes.snooze(signal, until: previous)
-            } else {
-                self.board.snoozes.end(signalId: signal.id)
-            }
-            self.onChange()
+            self?.snoozes.set(signal, until: previous)
+            self?.onChange()
         })
     }
 
     /// Unsnooze on a Snoozed row (ADR 0045). No Undo bar; the row
     /// reappearing is the confirmation.
     public func unsnooze(_ signal: Signal) {
-        board.snoozes.end(signalId: signal.id)
+        snoozes.end(signalId: signal.id)
         onChange()
     }
 

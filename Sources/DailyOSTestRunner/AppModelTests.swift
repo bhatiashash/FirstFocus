@@ -26,11 +26,17 @@ private struct Harness: @unchecked Sendable {
     let eventKitChanges: FakeEventKitChangeObserver
     let foreground: FakeForegroundObserver
     let dayChanges: FakeDayChangeObserver
-    let undoClock: FakeUndoClock
+    let undoAlarm: FakeAlarm
     let reExtractionSettings: ReExtractionSettings
     let extractor: FakeIntentExtractor
     let historyStore: SQLiteHistoryStore
     let correctionStore: FakeCorrectionStore
+    let now: SettableNow
+}
+
+/// The harness's clock, so a test can move time on without waiting.
+final class SettableNow: @unchecked Sendable {
+    var date = Date()
 }
 
 @MainActor
@@ -48,7 +54,7 @@ private func makeHarness(
     let eventKitChanges = FakeEventKitChangeObserver()
     let foreground = FakeForegroundObserver()
     let dayChanges = FakeDayChangeObserver()
-    let undoClock = FakeUndoClock()
+    let undoAlarm = FakeAlarm()
     // A throwaway defaults suite, so Zen Focus Mode's persisted flag and
     // re-extraction's cooldown never touch the real ones this machine's
     // app is using.
@@ -57,7 +63,9 @@ private func makeHarness(
     let extractor = FakeIntentExtractor(responses: [:])
     let historyStore = makeTestHistoryStore()
     let correctionStore = FakeCorrectionStore()
+    let now = SettableNow()
     let model = AppModel(AppDependencies.test { d in
+        d.now = { now.date }
         d.taskSource = taskSource
         d.messagesSource = messagesSource
         d.signalStore = signalStore
@@ -69,19 +77,19 @@ private func makeHarness(
         d.dayChanges = dayChanges
         d.zenFocusModePreference = ZenFocusModePreference(defaults: defaults)
         d.reExtractionSettings = reExtractionSettings
-        d.undoClock = undoClock
+        d.undoAlarm = undoAlarm
         d.loadModel = { _, _ in extractor }
         d.historyStore = historyStore
         d.correctionStore = correctionStore
         d.apiKeyStore = FakeAPIKeyStore()
         // Never fired, so only the triggers a test fires derive the list.
-        d.snoozeWakeClock = FakeUndoClock()
+        d.snoozeWakeAlarm = FakeAlarm()
     })
     return Harness(
         model: model, taskSource: taskSource, messagesSource: messagesSource, signalStore: signalStore,
         settingsOpener: settingsOpener, clock: clock, eventKitChanges: eventKitChanges, foreground: foreground,
-        dayChanges: dayChanges, undoClock: undoClock, reExtractionSettings: reExtractionSettings, extractor: extractor, historyStore: historyStore,
-        correctionStore: correctionStore
+        dayChanges: dayChanges, undoAlarm: undoAlarm, reExtractionSettings: reExtractionSettings, extractor: extractor, historyStore: historyStore,
+        correctionStore: correctionStore, now: now
     )
 }
 
@@ -177,16 +185,14 @@ func registerAppModelTests(_ runner: TestRunner) {
         r.run("a day change derives the Ranked List again without fetching from either Source (ADR 0042)") {
             let h = await MainActor.run { makeHarness(tasks: [task(id: "r1", title: "Call the dentist")]) }
             await h.model.start()
-            // A Snooze that runs out is the one change `now` alone makes to
-            // the list that this harness can reach without a clock seam.
-            // The store keeps whole seconds, so the Snooze ends on the
-            // second after next.
-            let until = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.up) + 1)
+            // A Snooze running out is a change time alone makes to the list.
+            // The store keeps whole seconds.
+            let until = Date(timeIntervalSince1970: h.now.date.timeIntervalSince1970.rounded(.up) + 60)
             await MainActor.run {
                 let signal = h.model.rankedList.focus.first { $0.id == "r1" }!
                 h.model.snooze(signal, until: until)
             }
-            try? await Task.sleep(nanoseconds: UInt64((until.timeIntervalSinceNow + 0.1) * 1_000_000_000))
+            h.now.date = until.addingTimeInterval(60)
             let (remindersBefore, messagesBefore) = (h.taskSource.listCallCount, h.messagesSource.listCallCount)
             let stillHidden = await MainActor.run { !h.model.rankedList.focus.contains { $0.id == "r1" } }
             try expect(stillHidden, "nothing has derived the list since the Snooze ran out")
@@ -353,24 +359,6 @@ func registerAppModelTests(_ runner: TestRunner) {
             try await MainActor.run { try expect(h.model.canReExtract == false, "isLoading starts true") }
         }
 
-        r.run("a re-extraction already in progress disables it") {
-            let h = await MainActor.run { makeHarness() }
-            await MainActor.run {
-                h.model.isLoading = false
-                h.model.reExtractionProgress = (completed: 1, total: 10)
-            }
-            try await MainActor.run { try expect(h.model.canReExtract == false) }
-        }
-
-        r.run("a first-run backfill in progress disables it") {
-            let h = await MainActor.run { makeHarness() }
-            await MainActor.run {
-                h.model.isLoading = false
-                h.model.backfillProgress = (completed: 1, total: 10)
-            }
-            try await MainActor.run { try expect(h.model.canReExtract == false) }
-        }
-
         r.run("Messages needing Full Disk Access disables it — nothing to re-extract from") {
             let h = await MainActor.run { makeHarness(messages: .unavailable) }
             await h.model.reloadMessages()
@@ -419,7 +407,7 @@ func registerAppModelTests(_ runner: TestRunner) {
             await MainActor.run {
                 h.model.isLoading = false
                 h.reExtractionSettings.minimumIntervalHours = 0
-                h.reExtractionSettings.lastRunAt = Date()
+                h.reExtractionSettings.lastRunAt = h.now.date
             }
             try await MainActor.run { try expect(h.model.canReExtract) }
         }

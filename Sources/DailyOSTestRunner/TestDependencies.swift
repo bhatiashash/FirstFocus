@@ -27,7 +27,7 @@ extension AppDependencies {
             focusListPreference: focusList,
             extractionSettings: ExtractionSettings(defaults: defaults),
             reExtractionSettings: ReExtractionSettings(defaults: defaults),
-            undoClock: FakeUndoClock(),
+            undoAlarm: FakeAlarm(),
             undoWindow: 5,
             loadModel: { _, _ in FakeIntentExtractor() },
             historyStore: makeTestHistoryStore(),
@@ -38,11 +38,12 @@ extension AppDependencies {
             apiKeyStore: FakeAPIKeyStore(),
             makeScreener: { _ in FakeScreener() },
             ruleStore: FakeRuleStore(),
-            batchWakeClock: FakeUndoClock(),
+            batchWakeAlarm: FakeAlarm(),
             auditRoll: { Double.random(in: 0..<1) },
             now: { Date() },
             bundlePath: "/nonexistent",
-            snoozeWakeClock: FakeUndoClock()
+            snoozeWakeAlarm: FakeAlarm(),
+            morningBriefAlarm: FakeAlarm()
         )
         configure(&dependencies)
         return dependencies

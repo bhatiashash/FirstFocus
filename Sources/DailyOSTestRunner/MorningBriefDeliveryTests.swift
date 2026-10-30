@@ -39,7 +39,7 @@ private func today(_ hour: Int, _ minute: Int = 0) -> Date {
 private func makeDelivery(
     sender: FakeMessageSender = FakeMessageSender(), myNumber: String? = "+15550100", enabled: Bool = false,
     at time: Date = today(7, 55), suite: String = UUID().uuidString,
-    clock: FakeUndoClock = FakeUndoClock()
+    clock: FakeAlarm = FakeAlarm()
 ) -> (delivery: MorningBriefDelivery, preference: MorningBriefPreference, now: TestNow) {
     let preference = MorningBriefPreference(defaults: morningBriefDefaults(suite))
     preference.isEnabled = enabled
@@ -47,7 +47,7 @@ private func makeDelivery(
     let delivery = MorningBriefDelivery(
         preference: preference, sender: sender, recipient: { myNumber },
         compose: { "\(morningBriefHeader)\n\nPay rent\n\n(0 in Later)" },
-        now: { now.date }, clock: clock
+        now: { now.date }, alarm: clock
     )
     return (delivery, preference, now)
 }
@@ -95,25 +95,24 @@ func registerMorningBriefDeliveryTests(_ runner: TestRunner) {
     runner.suite("Morning Brief: the daily send") { r in
         r.run("goes out at 8:00 when the toggle is on") {
             let sender = FakeMessageSender()
-            let clock = FakeUndoClock()
+            let clock = FakeAlarm()
             let (delivery, _, now) = await MainActor.run { makeDelivery(sender: sender, enabled: true, clock: clock) }
             await delivery.start()
             try expect(sender.sent.isEmpty, "nothing before 8:00")
-            try expect(clock.scheduledInterval == 300, "got \(String(describing: clock.scheduledInterval))")
+            let pending = await clock.pending
+            try expect(pending == today(8), "got \(String(describing: pending))")
             await MainActor.run { now.date = today(8) }
-            clock.fire()
-            await settleDelivery()
+            await clock.fire()
             try expect(sender.sent.count == 1)
         }
 
         r.run("sends nothing at 8:00 with the toggle off") {
             let sender = FakeMessageSender()
-            let clock = FakeUndoClock()
+            let clock = FakeAlarm()
             let (delivery, _, now) = await MainActor.run { makeDelivery(sender: sender, enabled: false, clock: clock) }
             await delivery.start()
             await MainActor.run { now.date = today(8) }
-            clock.fire()
-            await settleDelivery()
+            await clock.fire()
             try expect(sender.sent.isEmpty)
         }
 
@@ -157,13 +156,12 @@ func registerMorningBriefDeliveryTests(_ runner: TestRunner) {
 
         r.run("a test send at 7:55 doesn't stop the 8:00 send") {
             let sender = FakeMessageSender()
-            let clock = FakeUndoClock()
+            let clock = FakeAlarm()
             let (delivery, _, now) = await MainActor.run { makeDelivery(sender: sender, enabled: true, clock: clock) }
             await delivery.start()
             await delivery.sendTest()
             await MainActor.run { now.date = today(8) }
-            clock.fire()
-            await settleDelivery()
+            await clock.fire()
             try expect(sender.sent.count == 2)
         }
 
@@ -195,16 +193,16 @@ func registerMorningBriefDeliveryTests(_ runner: TestRunner) {
     runner.suite("Morning Brief: a send time you choose") { r in
         r.run("the timer is set for the chosen time, and the Brief goes out then") {
             let sender = FakeMessageSender()
-            let clock = FakeUndoClock()
+            let clock = FakeAlarm()
             let (delivery, preference, now) = await MainActor.run {
                 makeDelivery(sender: sender, enabled: true, at: today(6, 0), clock: clock)
             }
             preference.sendTime = MorningBriefTime(hour: 6, minute: 45)
             await delivery.start()
-            try expect(clock.scheduledInterval == 45 * 60, "got \(String(describing: clock.scheduledInterval))")
+            let pending = await clock.pending
+            try expect(pending == today(6, 45), "got \(String(describing: pending))")
             await MainActor.run { now.date = today(6, 45) }
-            clock.fire()
-            await settleDelivery()
+            await clock.fire()
             try expect(sender.sent.count == 1)
         }
 
@@ -220,11 +218,12 @@ func registerMorningBriefDeliveryTests(_ runner: TestRunner) {
         }
 
         r.run("changing the time sets the timer again") {
-            let clock = FakeUndoClock()
+            let clock = FakeAlarm()
             let (delivery, _, _) = await MainActor.run { makeDelivery(enabled: true, at: today(6, 0), clock: clock) }
             await delivery.start()
             await delivery.setSendTime(MorningBriefTime(hour: 9, minute: 0))
-            try expect(clock.scheduledInterval == 3 * 3600, "got \(String(describing: clock.scheduledInterval))")
+            let pending = await clock.pending
+            try expect(pending == today(9), "got \(String(describing: pending))")
         }
 
         r.run("8:00 AM is the default") {
@@ -232,9 +231,4 @@ func registerMorningBriefDeliveryTests(_ runner: TestRunner) {
             try expect(preference.sendTime == MorningBriefTime(hour: 8, minute: 0))
         }
     }
-}
-
-/// The 8:00 timer hops to the main actor through a `Task`.
-private func settleDelivery() async {
-    try? await Task.sleep(nanoseconds: 100_000_000)
 }

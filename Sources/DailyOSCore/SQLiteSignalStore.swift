@@ -467,6 +467,21 @@ public final class SQLiteSignalStore: SignalStore, @unchecked Sendable {
         }
     }
 
+    public func earliestSnoozeEnd(after moment: Date) -> Date? {
+        guard let db = open() else { return nil }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "SELECT snoozed_until FROM snoozes", -1, &statement, nil) == SQLITE_OK,
+              let statement else { return nil }
+        var earliest: Date?
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let text = text(statement, 0), let date = dateFormatter.date(from: text), date > moment else { continue }
+            earliest = min(earliest ?? date, date)
+        }
+        return earliest
+    }
+
     /// `snoozedUntil(signalId:)`, batched — see `focusOrders(signalIds:)`.
     public func snoozedUntils(signalIds: [String]) -> [String: Date] {
         guard !signalIds.isEmpty else { return [:] }

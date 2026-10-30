@@ -30,7 +30,7 @@ private func makeBoard(
         messagesSource: messagesSource, signalStore: store, contactsResolver: FakeContactsResolver(),
         bundlePath: "/nonexistent", extractor: FakeIntentExtractor()
     )
-    let board = SignalBoard(taskSource: taskSource, signalStore: store)
+    let board = SignalBoard(taskSource: taskSource, signalStore: store, snoozes: Snoozes(store: store))
     return (board, taskSource, intake, store)
 }
 
@@ -67,13 +67,13 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
 
         r.run("a Snoozed Signal is listed under snoozed and in neither Tier") {
-            let (board, _, _, _) = await MainActor.run {
+            let (board, _, _, store) = await MainActor.run {
                 makeBoard(tasks: [reminderTask(id: "r1", title: "Pay rent", priority: .high), reminderTask(id: "r2", title: "Book flights")])
             }
             await board.refreshReminders()
             try await MainActor.run {
                 let row = try require(board.rankedList(now: now).focus.first { $0.id == "r1" })
-                board.snoozes.snooze(row, until: now.addingTimeInterval(3600))
+                Snoozes(store: store).snooze(row, until: now.addingTimeInterval(3600))
                 let list = board.rankedList(now: now)
                 try expect(list.snoozed.map(\.id) == ["r1"])
                 try expect(!list.focus.contains { $0.id == "r1" } && !list.later.contains { $0.id == "r1" })
@@ -82,25 +82,25 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         }
 
         r.run("snoozed is ordered soonest to return first") {
-            let (board, _, _, _) = await MainActor.run {
+            let (board, _, _, store) = await MainActor.run {
                 makeBoard(tasks: [reminderTask(id: "r1", title: "A"), reminderTask(id: "r2", title: "B"), reminderTask(id: "r3", title: "C")])
             }
             await board.refreshReminders()
             try await MainActor.run {
                 let later = board.rankedList(now: now).later
                 let byId = Dictionary(uniqueKeysWithValues: later.map { ($0.id, $0) })
-                board.snoozes.snooze(byId["r1"]!, until: now.addingTimeInterval(3 * 3600))
-                board.snoozes.snooze(byId["r2"]!, until: now.addingTimeInterval(1 * 3600))
-                board.snoozes.snooze(byId["r3"]!, until: now.addingTimeInterval(2 * 3600))
+                Snoozes(store: store).snooze(byId["r1"]!, until: now.addingTimeInterval(3 * 3600))
+                Snoozes(store: store).snooze(byId["r2"]!, until: now.addingTimeInterval(1 * 3600))
+                Snoozes(store: store).snooze(byId["r3"]!, until: now.addingTimeInterval(2 * 3600))
                 try expect(board.rankedList(now: now).snoozed.map(\.id) == ["r2", "r3", "r1"])
             }
         }
 
         r.run("once the snooze ends the Signal leaves snoozed and is back in its Tier") {
-            let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
+            let (board, _, _, store) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
             await board.refreshReminders()
             try await MainActor.run {
-                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                Snoozes(store: store).snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 let later = board.rankedList(now: now.addingTimeInterval(3601))
                 try expect(later.snoozed.isEmpty)
                 try expect(later.later.map(\.id) == ["r1"])
@@ -109,11 +109,11 @@ func registerSignalBoardTests(_ runner: TestRunner) {
 
         r.run("Snoozed Signals don't use up the Later cap") {
             let tasks = (0..<(maxRankedSignals + 3)).map { reminderTask(id: "r\($0)", title: "Task \($0)") }
-            let (board, _, _, _) = await MainActor.run { makeBoard(tasks: tasks) }
+            let (board, _, _, store) = await MainActor.run { makeBoard(tasks: tasks) }
             await board.refreshReminders()
             try await MainActor.run {
                 for row in board.rankedList(now: now).later.prefix(3) {
-                    board.snoozes.snooze(row, until: now.addingTimeInterval(3600))
+                    Snoozes(store: store).snooze(row, until: now.addingTimeInterval(3600))
                 }
                 let list = board.rankedList(now: now)
                 try expect(list.later.count == maxRankedSignals, "got \(list.later.count)")
@@ -122,11 +122,11 @@ func registerSignalBoardTests(_ runner: TestRunner) {
         }
 
         r.run("unsnooze puts the Signal straight back in its Tier") {
-            let (board, _, _, _) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
+            let (board, _, _, store) = await MainActor.run { makeBoard(tasks: [reminderTask(id: "r1")]) }
             await board.refreshReminders()
             try await MainActor.run {
-                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
-                board.snoozes.end(signalId: "r1")
+                Snoozes(store: store).snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                Snoozes(store: store).end(signalId: "r1")
                 let list = board.rankedList(now: now)
                 try expect(list.snoozed.isEmpty)
                 try expect(list.later.map(\.id) == ["r1"])
@@ -158,14 +158,14 @@ func registerSignalBoardTests(_ runner: TestRunner) {
             await board.apply(messages: await intake.refresh(now: now))
             try await MainActor.run {
                 try expect(board.rankedList(now: now).later.map(\.label) == ["Buy milk"])
-                board.snoozes.snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
+                Snoozes(store: store).snooze(board.rankedList(now: now).later[0], until: now.addingTimeInterval(3600))
                 try expect(board.rankedList(now: now).later.isEmpty, "a snoozed Signal should disappear on the next read alone")
             }
         }
 
         r.run("manual Focus order is read fresh after reorderFocus, with no array patch") {
             let now = Date()
-            let (board, _, _, _) = await MainActor.run {
+            let (board, _, _, store) = await MainActor.run {
                 makeBoard(tasks: [
                     // Explicit times: two `Date()` calls a few nanoseconds
                     // apart can compare equal, leaving recency a tie.

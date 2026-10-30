@@ -5,24 +5,6 @@ import Foundation
 /// Ticket 05 (batched-extraction): when a pass leaves a Batch open, Intake
 /// asks for one refresh at the moment it will close.
 
-/// Keeps every scheduled action, not just the latest, so a test can fire
-/// a superseded wake-up and check it does nothing.
-private final class RecordingClock: UndoClock, @unchecked Sendable {
-    private let lock = NSLock()
-    private var scheduled: [(interval: TimeInterval, action: @Sendable () -> Void)] = []
-
-    var intervals: [TimeInterval] { lock.withLock { scheduled.map(\.interval) } }
-
-    func scheduleOnce(after interval: TimeInterval, _ action: @escaping @Sendable () -> Void) {
-        lock.withLock { scheduled.append((interval, action)) }
-    }
-
-    func fire(_ index: Int) {
-        let action = lock.withLock { scheduled[index].action }
-        action()
-    }
-}
-
 private final class WakeCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
@@ -36,7 +18,7 @@ private func other(_ id: String, chat: Int = 3, text: String, at date: Date) -> 
 
 @MainActor
 private func makeIntake(
-    messages: [ChatMessage], clock: RecordingClock, counter: WakeCounter
+    messages: [ChatMessage], clock: FakeAlarm, counter: WakeCounter
 ) -> (MessagesIntake, FakeMessagesSource, SQLiteSignalStore, FakeIntentExtractor) {
     let source = FakeMessagesSource(messages: messages)
     let store = makeTestSignalStore()
@@ -44,7 +26,7 @@ private func makeIntake(
     let extractor = FakeIntentExtractor(defaultResponse: "Grab milk")
     let intake = MessagesIntake(
         messagesSource: source, signalStore: store, contactsResolver: FakeContactsResolver(),
-        bundlePath: "/nonexistent", extractor: extractor, batchWakeClock: clock
+        bundlePath: "/nonexistent", extractor: extractor, batchWakeAlarm: clock
     )
     intake.onBatchDue = { counter.increment() }
     return (intake, source, store, extractor)
@@ -54,24 +36,24 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
     runner.suite("MessagesIntake: waking up for an open Batch") { r in
         r.run("an open Batch schedules one wake-up for when it goes quiet, and the wake-up asks for a refresh") {
             let now = Date()
-            let clock = RecordingClock()
+            let clock = FakeAlarm()
             let counter = WakeCounter()
             let (intake, _, store, extractor) = await makeIntake(
                 messages: [other("m1", text: "can you grab milk", at: now.addingTimeInterval(-5))], clock: clock, counter: counter
             )
             _ = await intake.refresh(now: now)
             try expect(extractor.calls.isEmpty, "the Batch is still open")
-            try expect(clock.intervals.count == 1)
-            try expect(abs(clock.intervals[0] - (batchQuietWindow - 5)) < 0.5, "got \(clock.intervals)")
-            clock.fire(0)
-            try await waitFor { counter.value == 1 }
+            let pending = try require(await clock.pending)
+            try expect(abs(pending.timeIntervalSince(now) - (batchQuietWindow - 5)) < 0.5, "got \(pending)")
+            await clock.fire()
+            try expect(counter.value == 1)
             _ = await intake.refresh(now: now.addingTimeInterval(batchQuietWindow))
             try expect(store.openSignals().map(\.label) == ["Grab milk"])
         }
 
         r.run("a message arriving first moves the wake-up, and only the newest one asks for a refresh") {
             let now = Date()
-            let clock = RecordingClock()
+            let clock = FakeAlarm()
             let counter = WakeCounter()
             let (intake, source, _, _) = await makeIntake(
                 messages: [other("m1", text: "can you grab milk", at: now.addingTimeInterval(-5))], clock: clock, counter: counter
@@ -79,17 +61,16 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
             _ = await intake.refresh(now: now)
             source.messages.append(other("m2", text: "and bread", at: now.addingTimeInterval(10)))
             _ = await intake.refresh(now: now.addingTimeInterval(10))
-            try expect(clock.intervals.count == 2)
-            try expect(abs(clock.intervals[1] - batchQuietWindow) < 0.5, "the Chat's newest message restarts the quiet window")
-            clock.fire(0)
-            clock.fire(1)
-            try await waitFor { counter.value >= 1 }
-            try expect(counter.value == 1, "the superseded wake-up must do nothing")
+            let pending = try require(await clock.pending)
+            try expect(abs(pending.timeIntervalSince(now) - batchQuietWindow) < 0.5, "the Chat's newest message restarts the quiet window")
+            await clock.fire()
+            await clock.fire()
+            try expect(counter.value == 1, "the replaced wake-up never runs")
         }
 
         r.run("a Chat that keeps going is woken at the cap, not after its last message") {
             let now = Date()
-            let clock = RecordingClock()
+            let clock = FakeAlarm()
             let counter = WakeCounter()
             // One message every 15 seconds, so the Chat never goes quiet.
             let messages = stride(from: -110.0, through: -5, by: 15).map { offset in
@@ -97,24 +78,26 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
             }
             let (intake, _, _, _) = await makeIntake(messages: messages, clock: clock, counter: counter)
             _ = await intake.refresh(now: now)
-            try expect(abs((clock.intervals.first ?? -1) - (batchCap - 110)) < 0.5, "got \(clock.intervals)")
+            let pending = try require(await clock.pending)
+            try expect(abs(pending.timeIntervalSince(now) - (batchCap - 110)) < 0.5, "got \(pending)")
         }
 
         r.run("with no open Batch, no wake-up is scheduled") {
             let now = Date()
-            let clock = RecordingClock()
+            let clock = FakeAlarm()
             let (intake, _, store, _) = await makeIntake(
                 messages: [other("m1", text: "can you grab milk", at: now.addingTimeInterval(-60))], clock: clock, counter: WakeCounter()
             )
             _ = await intake.refresh(now: now)
-            try expect(clock.intervals.isEmpty)
+            let pending = await clock.pending
+            try expect(pending == nil)
             try expect(store.openSignals().count == 1)
         }
     }
 
     runner.suite("AppModel: a Batch wake-up refreshes Messages") { r in
         r.run("firing the wake-up runs a Messages pass that judges the Batch") {
-            let clock = RecordingClock()
+            let clock = FakeAlarm()
             let extractor = FakeIntentExtractor(defaultResponse: "Grab milk")
             let source = FakeMessagesSource(messages: [other("m1", text: "can you grab milk", at: Date().addingTimeInterval(-5))])
             let model = await MainActor.run { () -> AppModel in
@@ -136,17 +119,18 @@ func registerBatchWakeUpTests(_ runner: TestRunner) {
                     d.historyStore = makeTestHistoryStore()
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()
-                    d.batchWakeClock = clock
+                    d.batchWakeAlarm = clock
                     d.bundlePath = "/nonexistent"
                 })
             }
             await model.start()
             try expect(extractor.calls.isEmpty)
-            try expect(clock.intervals.count == 1)
+            let pending = await clock.pending
+            try expect(pending != nil)
             // Age the message past the quiet window before the wake-up
             // fires, as real time would have.
             source.messages = [other("m1", text: "can you grab milk", at: Date().addingTimeInterval(-60))]
-            clock.fire(0)
+            await clock.fire()
             try await waitFor { extractor.calls.count == 1 }
             try await waitFor { await MainActor.run { model.rankedList.suggested.count == 1 } }
         }

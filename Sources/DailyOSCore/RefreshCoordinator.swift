@@ -69,7 +69,7 @@ public final class RefreshCoordinator {
         foreground: (any ForegroundObserver)? = nil,
         messagesChanges: (any MessagesChangeObserver)? = nil,
         dayChanges: (any DayChangeObserver)? = nil,
-        debounceClock: any UndoClock = TaskSleepUndoClock(),
+        debounceAlarm: (any Alarm)? = nil,
         messagesChangeDebounce: TimeInterval = 1,
         onRefresh: @escaping @Sendable (RefreshTrigger) -> Void
     ) {
@@ -77,14 +77,15 @@ public final class RefreshCoordinator {
         // Messages writes `chat.db` and its WAL several times per incoming
         // message, so unlike the EventKit notification below, these are
         // grouped: the first change opens a window, later ones inside it
-        // are absorbed, and one refresh fires when it closes.
-        // `UndoClock` is just the codebase's one-shot timer seam, reused.
-        let grouper = ChangeGrouper()
+        // are absorbed, and one refresh fires when it closes. The window is
+        // open while the alarm is pending.
+        let debounce = debounceAlarm ?? WallClockAlarm()
         messagesChanges?.onChange {
-            guard grouper.open() else { return }
-            debounceClock.scheduleOnce(after: messagesChangeDebounce) {
-                grouper.close()
-                onRefresh(.messagesChanged)
+            Task { @MainActor in
+                guard !debounce.isPending else { return }
+                debounce.schedule(at: Date().addingTimeInterval(messagesChangeDebounce)) {
+                    onRefresh(.messagesChanged)
+                }
             }
         }
         clock.scheduleRepeating(interval: pollInterval) {
@@ -105,27 +106,6 @@ public final class RefreshCoordinator {
 
     public func foregroundBecameActive() {
         onRefresh(.foreground)
-    }
-}
-
-/// Whether a grouping window for Messages changes is currently open.
-/// `open()` returns true only for the change that opens a new window.
-/// `@unchecked Sendable`: its one piece of state is only touched under
-/// `lock`.
-private final class ChangeGrouper: @unchecked Sendable {
-    private let lock = NSLock()
-    private var isOpen = false
-
-    func open() -> Bool {
-        lock.withLock {
-            guard !isOpen else { return false }
-            isOpen = true
-            return true
-        }
-    }
-
-    func close() {
-        lock.withLock { isOpen = false }
     }
 }
 

@@ -56,8 +56,7 @@ func registerCheckOffCoordinatorTests(_ runner: TestRunner) {
                 coordinator.commit(testReminderSignal(id: "r1"))
                 try expect(coordinator.hiddenIDs == ["r1"], "still hidden while the write is in flight")
             }
-            // The write itself runs in a detached Task; give it a moment.
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            await coordinator.settled()
             try await MainActor.run {
                 try expect(taskSource.completedIds == ["r1"])
                 try expect(coordinator.hiddenIDs.isEmpty, "no longer hidden once the write has landed")
@@ -75,7 +74,7 @@ func registerCheckOffCoordinatorTests(_ runner: TestRunner) {
                 coordinator.commit(testReminderSignal(id: "r1"))
                 return seen
             }
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            await coordinator.settled()
             try await MainActor.run { try expect(hiddenDuringReread.value == ["r1"], "got \(String(describing: hiddenDuringReread.value))") }
         }
     }

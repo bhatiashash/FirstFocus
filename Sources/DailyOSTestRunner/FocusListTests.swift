@@ -29,6 +29,7 @@ private struct UnreadableStore: FocusListStore {
 private struct Harness: @unchecked Sendable {
     let focusList: FocusList
     let board: SignalBoard
+    let snoozes: Snoozes
     let taskSource: FakeTaskSource
     let store: SQLiteSignalStore
     let preference: FocusListPreference
@@ -60,12 +61,15 @@ private func makeHarness(
     }
     let store = makeTestSignalStore()
     try? store.setFocusListPlacements(placed)
-    let board = SignalBoard(taskSource: taskSource, signalStore: store)
-    let focusList = FocusList(taskSource: taskSource, store: record ?? store, board: board, preference: preference)
+    let snoozes = Snoozes(store: store)
+    let board = SignalBoard(taskSource: taskSource, signalStore: store, snoozes: snoozes)
+    let focusList = FocusList(
+        taskSource: taskSource, store: record ?? store, board: board, snoozes: snoozes, preference: preference
+    )
     let changes = Count()
     focusList.onChange = { changes.value += 1 }
     return Harness(
-        focusList: focusList, board: board, taskSource: taskSource, store: store, preference: preference, changes: changes
+        focusList: focusList, board: board, snoozes: snoozes, taskSource: taskSource, store: store, preference: preference, changes: changes
     )
 }
 
@@ -140,10 +144,10 @@ func registerFocusListTests(_ runner: TestRunner) {
         r.run("a Snoozed reminder leaves the list and stays Snoozed") {
             let h = await MainActor.run { makeHarness([task("a", priority: .high, list: focus)], placed: [placed("a", home)]) }
             let until = Date().addingTimeInterval(3600)
-            await MainActor.run { h.board.snoozes.snooze(signalId: "a", until: until, dueAt: nil) }
+            await MainActor.run { h.snoozes.snooze(signalId: "a", until: until, dueAt: nil) }
             await sync(h)
             try expect(list(of: "a", in: h.taskSource) == home)
-            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "a") != nil, "only a move you make ends a snooze") }
+            try await MainActor.run { try expect(h.snoozes.until(signalId: "a") != nil, "only a move you make ends a snooze") }
         }
 
         r.run("a reminder checked off in the list goes back to its own list") {
@@ -188,9 +192,9 @@ func registerFocusListTests(_ runner: TestRunner) {
 
         r.run("putting a Snoozed reminder in the list ends its snooze") {
             let h = await MainActor.run { makeHarness([task("a", priority: .high, list: focus)]) }
-            await MainActor.run { h.board.snoozes.snooze(signalId: "a", until: Date().addingTimeInterval(3600), dueAt: nil) }
+            await MainActor.run { h.snoozes.snooze(signalId: "a", until: Date().addingTimeInterval(3600), dueAt: nil) }
             await sync(h)
-            try await MainActor.run { try expect(h.board.snoozes.until(signalId: "a") == nil) }
+            try await MainActor.run { try expect(h.snoozes.until(signalId: "a") == nil) }
             try expect(list(of: "a", in: h.taskSource) == focus)
             try expect(h.changes.value == 1, "ending a snooze changes the Board")
         }
@@ -358,7 +362,7 @@ func registerFocusListTests(_ runner: TestRunner) {
             h.taskSource.unmovableIds = ["a"]
             await sync(h)
             try expect(list(of: "a", in: h.taskSource) == home)
-            await MainActor.run { h.board.snoozes.snooze(signalId: "b", until: Date().addingTimeInterval(3600), dueAt: nil) }
+            await MainActor.run { h.snoozes.snooze(signalId: "b", until: Date().addingTimeInterval(3600), dueAt: nil) }
             await sync(h, fetch: false)
             try expect(list(of: "b", in: h.taskSource) == home, "a snooze still takes it out")
         }

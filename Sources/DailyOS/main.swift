@@ -275,7 +275,9 @@ appDelegate.beforeQuit = { model.prepareToQuit() }
 let settingsViewModel = SettingsViewModel(
     extractionSettings: extractionSettings, reExtractionSettings: reExtractionSettings, extraction: model.extraction
 )
-let historyViewModel = HistoryViewModel(historyStore: historyStore, actions: model.historyActions)
+let historyViewModel = HistoryViewModel(
+    historyStore: historyStore, actions: model.historyActions, screeningSettings: screeningSettings
+)
 let rulesViewModel = RulesViewModel(store: ruleStore, extraction: model.extraction)
 let mutedChatsViewModel = MutedChatsViewModel(actions: model.historyActions, historyStore: historyStore)
 let screeningViewModel = ScreeningSettingsViewModel(
@@ -290,7 +292,8 @@ let morningBriefPreference = MorningBriefPreference()
 let selfThread = ChatDBMessagesSource(path: liveChatDBPath)
 let morningBriefDelivery = MorningBriefDelivery(
     preference: morningBriefPreference, sender: MessagesAppSender(), recipient: { selfThread.selfThreadAddress() },
-    compose: { model.morningBriefText(format: morningBriefPreference.format) }
+    compose: { model.morningBriefText(format: morningBriefPreference.format) },
+    alarm: dependencies.morningBriefAlarm
 )
 let morningBriefViewModel = MorningBriefViewModel(
     delivery: morningBriefDelivery, preference: morningBriefPreference,

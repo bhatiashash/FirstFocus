@@ -138,10 +138,9 @@ public final class MorningBriefDelivery {
     private let recipient: @MainActor () -> String?
     private let compose: @MainActor () -> String
     private let now: @MainActor () -> Date
-    private let clock: any UndoClock
-
-    /// Tells a stale 8:00 timer from the current one.
-    private var timerToken = 0
+    /// The daily send's timer. It fires on wake when the Mac slept
+    /// through the send time.
+    private let alarm: any Alarm
     /// A wake and the 8:00 timer arriving together send one Brief.
     private var isSendingDaily = false
 
@@ -157,14 +156,14 @@ public final class MorningBriefDelivery {
     public init(
         preference: MorningBriefPreference, sender: any MessageSender, recipient: @escaping @MainActor () -> String?,
         compose: @escaping @MainActor () -> String,
-        now: @escaping @MainActor () -> Date = { Date() }, clock: any UndoClock = TaskSleepUndoClock()
+        now: @escaping @MainActor () -> Date = { Date() }, alarm: any Alarm
     ) {
         self.preference = preference
         self.sender = sender
         self.recipient = recipient
         self.compose = compose
         self.now = now
-        self.clock = clock
+        self.alarm = alarm
         self.status = preference.status
     }
 
@@ -180,8 +179,8 @@ public final class MorningBriefDelivery {
         scheduleNext()
     }
 
-    /// On wake from sleep: the same as launch. The timer counts no time
-    /// asleep, so it is set again from the real clock.
+    /// On wake from sleep: the same as launch. The alarm would fire within
+    /// a minute anyway; this sends a missed Brief without waiting for it.
     public func systemDidWake() async {
         await start()
     }
@@ -215,19 +214,15 @@ public final class MorningBriefDelivery {
     }
 
     private func scheduleNext() {
-        timerToken += 1
-        let token = timerToken
         let moment = now()
         let calendar = Calendar.current
         guard let todayAt = preference.sendTime.on(moment, calendar: calendar),
               let next = todayAt > moment ? todayAt : calendar.date(byAdding: .day, value: 1, to: todayAt)
         else { return }
-        clock.scheduleOnce(after: next.timeIntervalSince(moment)) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.timerToken == token else { return }
-                await self.sendIfDue()
-                self.scheduleNext()
-            }
+        alarm.schedule(at: next) { [weak self] in
+            guard let self else { return }
+            await self.sendIfDue()
+            self.scheduleNext()
         }
     }
 

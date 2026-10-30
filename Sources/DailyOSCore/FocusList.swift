@@ -56,6 +56,8 @@ public final class FocusList {
     private let taskSource: any TaskSource
     private let store: any FocusListStore
     private let board: SignalBoard
+    /// Putting a reminder in the Focus list yourself ends its snooze.
+    private let snoozes: Snoozes
     private let preference: FocusListPreference
 
     /// Called after a sync that changed the Board. The caller derives the
@@ -73,7 +75,11 @@ public final class FocusList {
     /// The lists `lists()` last returned.
     private var shownListIds: Set<String> = []
 
-    public init(taskSource: any TaskSource, store: any FocusListStore, board: SignalBoard, preference: FocusListPreference) {
+    public init(
+        taskSource: any TaskSource, store: any FocusListStore, board: SignalBoard, snoozes: Snoozes,
+        preference: FocusListPreference
+    ) {
+        self.snoozes = snoozes
         self.taskSource = taskSource
         self.store = store
         self.board = board
@@ -199,7 +205,7 @@ public final class FocusList {
             return false
         }
 
-        for step in toRun where step.unsnooze { board.snoozes.end(signalId: step.reminderId) }
+        for step in toRun where step.unsnooze { snoozes.end(signalId: step.reminderId) }
         let taskSource = self.taskSource
         let writes = toRun
         let failed = await Task.detached {

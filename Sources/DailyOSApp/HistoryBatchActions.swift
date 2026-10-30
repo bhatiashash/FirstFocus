@@ -19,7 +19,10 @@ public final class HistoryBatchActions {
 
     private weak var app: AppModel?
     private let board: SignalBoard
-    private let intake: MessagesIntake
+    /// Runs "This was work" and Try Again's one-Batch pass (intake-runner).
+    private let intakeRunner: IntakeRunner
+    /// Whether a model is loaded, and the model a Re-run replays through.
+    private let extraction: ExtractionHost
     private let historyStore: any HistoryStore
     private let signalStore: any BatchLedger & MessagesIntakeState
     private let corrections: Corrections
@@ -28,12 +31,13 @@ public final class HistoryBatchActions {
     private let screeningSettings: ScreeningSettings
 
     init(
-        app: AppModel, board: SignalBoard, intake: MessagesIntake, historyStore: any HistoryStore, signalStore: any BatchLedger & MessagesIntakeState,
+        app: AppModel, board: SignalBoard, intakeRunner: IntakeRunner, extraction: ExtractionHost, historyStore: any HistoryStore, signalStore: any BatchLedger & MessagesIntakeState,
         corrections: Corrections, screeningSettings: ScreeningSettings
     ) {
         self.app = app
         self.board = board
-        self.intake = intake
+        self.intakeRunner = intakeRunner
+        self.extraction = extraction
         self.historyStore = historyStore
         self.signalStore = signalStore
         self.corrections = corrections
@@ -52,7 +56,7 @@ public final class HistoryBatchActions {
         let refs = batches.compactMap(\.sourceRef)
         return HistoryFacts(
             showsScreening: base?.showsScreening ?? screeningSettings.isEnabled,
-            isModelLoaded: base?.isModelLoaded ?? (intake.extractor != nil),
+            isModelLoaded: base?.isModelLoaded ?? extraction.isLoaded,
             correctionTypes: corrections.types(forBatches: refs), supersessions: signalStore.supersessions(byBatches: refs),
             mutedChats: base?.mutedChats ?? signalStore.mutedChatIds(),
             processedBatches: Set(refs.filter { signalStore.isProcessed(sourceRef: $0) })
@@ -145,7 +149,7 @@ public final class HistoryBatchActions {
               let target = thisWasWorkTarget(batch, facts: facts) else { return }
         try? corrections.recordThisWasWork(target.row)
         changed()
-        await app?.extractNow(sourceRef: target.sourceRef)
+        await intakeRunner.extractNow(sourceRef: target.sourceRef)
         changed()
     }
 
@@ -175,14 +179,14 @@ public final class HistoryBatchActions {
         let facts = facts(forBatches: [batch])
         guard historyBatchOffers(for: batch, facts: facts)[.tryAgain] == .enabled,
               let target = tryAgainTarget(batch, facts: facts) else { return }
-        await app?.extractNow(sourceRef: target.sourceRef)
+        await intakeRunner.extractNow(sourceRef: target.sourceRef)
         changed()
     }
 
     /// Replays the Batch against the model now loaded and records the
     /// result as a new row, never editing the old one.
     public func rerun(_ batch: HistoryBatch) async {
-        guard isEnabled(.rerun, for: batch), let row = rerunRow(batch), let extractor = intake.extractor else { return }
+        guard isEnabled(.rerun, for: batch), let row = rerunRow(batch), let extractor = extraction.loadedModel else { return }
         try? await rerunHistoryEntry(row, extractor: extractor, historyStore: historyStore)
         changed()
     }

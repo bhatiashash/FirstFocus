@@ -20,10 +20,6 @@ public final class ExtractionHost {
     /// Called after every load, reload, unload and Screening access change:
     /// whether a model is loaded, and what History offers, may have changed.
     public var onChange: () -> Void = {}
-    /// Whether a Messages pass or a re-extraction is running. A Rule
-    /// proposal waits for neither (ADR 0034). Settable rather than an init
-    /// parameter, since its owner reads its own state.
-    public var isPassRunning: @MainActor () -> Bool = { false }
     /// The last load failed, or the model was unloaded.
     public private(set) var isUnavailable = false
 
@@ -103,6 +99,10 @@ public final class ExtractionHost {
     /// Whether a model is loaded.
     public var isLoaded: Bool { intake.extractor != nil }
 
+    /// The loaded model, for History's Re-run, which replays one row
+    /// through it outside any pass.
+    public var loadedModel: (any IntentExtractor)? { intake.extractor }
+
     /// The loaded model's name, `nil` with none loaded.
     public var displayName: String? { intake.extractor?.modelDisplayName }
 
@@ -121,7 +121,8 @@ public final class ExtractionHost {
     /// Whether a Rule proposal can run now, and if not, why.
     public func ruleProposalStatus() -> RuleProposalStatus {
         guard intake.extractor is FreeTextGenerating else { return .noModel }
-        guard !isPassRunning() else { return .passRunning }
+        // A Rule proposal waits for any pass, re-extraction included (ADR 0034).
+        guard intake.runningPass == nil else { return .passRunning }
         let count = newFalsePositives().count
         return count >= minimumCorrectionsForProposal ? .ready(newCorrections: count) : .needsMoreCorrections(have: count)
     }

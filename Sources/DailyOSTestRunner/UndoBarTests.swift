@@ -9,16 +9,11 @@ private final class Steps {
 }
 
 @MainActor
-private func makeBar() -> (bar: UndoBar, clock: FakeUndoClock, steps: Steps) {
-    let clock = FakeUndoClock()
-    return (UndoBar(clock: clock, window: 5), clock, Steps())
+private func makeBar() -> (bar: UndoBar, clock: FakeAlarm, steps: Steps) {
+    let clock = FakeAlarm()
+    return (UndoBar(alarm: clock, window: 5), clock, Steps())
 }
 
-/// The clock's actions hop to the main actor, as production's do. Lets
-/// them land before the test looks.
-private func settle() async {
-    try? await Task.sleep(nanoseconds: 50_000_000)
-}
 
 func registerUndoBarTests(_ runner: TestRunner) {
     runner.suite("undo-bar: an offer and its window") { r in
@@ -28,8 +23,7 @@ func registerUndoBarTests(_ runner: TestRunner) {
                 bar.offer(.dismissed, label: "Call the dentist", .reversible { steps.ran.append("reverse") })
                 try expect(bar.current?.text == "Dismissed \u{201C}Call the dentist\u{201D}", "got \(String(describing: bar.current))")
             }
-            clock.fire()
-            await settle()
+            await clock.fire()
             try await MainActor.run {
                 try expect(bar.current == nil)
                 try expect(steps.ran.isEmpty, "a reversible offer does nothing when its window ends")
@@ -45,8 +39,7 @@ func registerUndoBarTests(_ runner: TestRunner) {
                 try expect(bar.hiddenIDs == ["r1"])
                 try expect(steps.ran.isEmpty, "nothing is written while the offer shows")
             }
-            clock.fire()
-            await settle()
+            await clock.fire()
             try await MainActor.run {
                 try expect(steps.ran == ["commit r1"], "got \(steps.ran)")
                 try expect(bar.current == nil)
@@ -64,8 +57,7 @@ func registerUndoBarTests(_ runner: TestRunner) {
                 try expect(bar.current == nil)
                 try expect(bar.hiddenIDs.isEmpty)
             }
-            clock.fire()
-            await settle()
+            await clock.fire()
             try await MainActor.run { try expect(steps.ran.isEmpty, "got \(steps.ran)") }
         }
 
@@ -80,17 +72,16 @@ func registerUndoBarTests(_ runner: TestRunner) {
             }
         }
 
-        r.run("the replaced one's window ending writes nothing twice and leaves the newer one showing") {
+        r.run("the newer offer's window is the one pending, and ending it leaves the replaced one written once") {
             let (bar, clock, steps) = await MainActor.run { makeBar() }
             await MainActor.run {
                 bar.offer(.checkedOff, label: "Pay rent", .heldBack(hiding: "r1") { steps.ran.append("commit r1") })
                 bar.offer(.dismissed, label: "Grab milk", .reversible { steps.ran.append("reverse") })
             }
-            clock.fireOldest()
-            await settle()
+            await clock.fire()
             try await MainActor.run {
                 try expect(steps.ran == ["commit r1"], "got \(steps.ran)")
-                try expect(bar.current?.label == "Grab milk")
+                try expect(bar.current == nil)
             }
         }
     }
@@ -109,15 +100,11 @@ func registerUndoBarTests(_ runner: TestRunner) {
         }
 
         r.run("replaced, it stays done: its reverse never runs") {
-            let (bar, clock, steps) = await MainActor.run { makeBar() }
+            let (bar, _, steps) = await MainActor.run { makeBar() }
             await MainActor.run {
                 bar.offer(.dismissed, label: "Grab milk", .reversible { steps.ran.append("reverse milk") })
                 bar.offer(.dismissed, label: "Grab bread", .reversible { steps.ran.append("reverse bread") })
             }
-            clock.fireOldest()
-            await settle()
-            let label = await MainActor.run { bar.current?.label }
-            try expect(label == "Grab bread", "the replaced offer's window ending leaves the newer one, got \(String(describing: label))")
             await bar.undo()
             try await MainActor.run { try expect(steps.ran == ["reverse bread"], "got \(steps.ran)") }
         }
@@ -127,8 +114,7 @@ func registerUndoBarTests(_ runner: TestRunner) {
             await MainActor.run {
                 bar.offer(.dismissed, label: "Grab milk", .reversible { steps.ran.append("reverse") })
             }
-            clock.fire()
-            await settle()
+            await clock.fire()
             await bar.undo()
             try await MainActor.run { try expect(steps.ran.isEmpty, "got \(steps.ran)") }
         }

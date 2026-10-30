@@ -72,10 +72,8 @@ public struct ReExtractionSettings: @unchecked Sendable {
 
 /// Whether a re-extraction run is allowed to start right now: `lastRunAt`
 /// is either `nil` (never run) or far enough in the past to clear
-/// `minimumIntervalHours`. Pure, so `AppModel.canReExtract` can call this
-/// with a plain `Date()` at the call site and still have the decision
-/// itself independently testable — the same split `Ranking.rank(_:now:)`
-/// and `zenWindowSizing(...)` already use.
+/// `minimumIntervalHours`. Pure; `IntakeRunner.canReExtract` calls it
+/// with its injected `now`.
 public func reExtractionAllowed(now: Date, lastRunAt: Date?, minimumIntervalHours: Double) -> Bool {
     guard let lastRunAt else { return true }
     return now.timeIntervalSince(lastRunAt) >= minimumIntervalHours * 3600

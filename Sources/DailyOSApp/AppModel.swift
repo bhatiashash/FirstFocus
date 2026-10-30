@@ -74,14 +74,10 @@ public final class AppModel: ObservableObject {
     /// "Now", injected so a test can stand just before midnight. Read for
     /// ranking and for snoozing only.
     private let now: @MainActor () -> Date
-    /// Brings Snoozed rows back when their snooze ends (ADR 0045). The
-    /// day-change refresh comes at midnight, but a snooze ends at 8 AM.
-    private let snoozeWakeClock: any UndoClock
-    /// When the one wake-up `snoozeWakeClock` holds is for, and a token
-    /// telling it apart from any it replaced, whose late firing does
-    /// nothing.
-    private var snoozeWake: (at: Date, token: Int)?
-    private var snoozeWakeToken = 0
+    /// Every snooze, and the wake-up that brings a Snoozed row back when
+    /// its snooze ends (ADR 0045, snooze-wake). Handed to the Board, the
+    /// verbs and the Focus list.
+    private let snoozes: Snoozes
     @Published public var isLoading = true {
         didSet { updatePresentation() }
     }
@@ -101,27 +97,23 @@ public final class AppModel: ObservableObject {
     /// at once, whichever verb made the read.
     @Published public private(set) var messagesNeedFullDiskAccess = false
     @Published public private(set) var remindersUnavailable = false
-    /// A signing identity that changed since the last launch (ticket 10).
-    /// Shows Messages as Unavailable from launch until the first pass
-    /// reads Messages and finds out for itself.
-    private var messagesIdentityMismatch = false
     /// Read from `extraction` whenever it changes.
     @Published public private(set) var extractionUnavailable = false {
         didSet { updatePresentation() }
     }
-    @Published public var backfillProgress: (completed: Int, total: Int)? {
+    /// Mirrored from `intakeRunner` whenever it changes, because SwiftUI
+    /// has to redraw what they drive and DailyOSCore uses no Combine or
+    /// Observation
+    /// (ADR 0020).
+    @Published public private(set) var backfillProgress: (completed: Int, total: Int)? {
         didSet { updatePresentation() }
     }
     /// Which kind of Messages pass is running (ADR 0034), `nil` when none
     /// is: the input behind Re-extract being disabled rather than queueing
-    /// invisibly. Mirrored from intake's `runningPass` through
-    /// `onPassChange`, because SwiftUI has to redraw the control when it
-    /// changes and DailyOSCore cannot notify anyone (ADR 0020). Intake
-    /// reports the pass itself, so callers joining one pass never need
-    /// counting.
+    /// invisibly.
     @Published public private(set) var runningMessagesPass: PassKind?
     public var isMessagesPassRunning: Bool { runningMessagesPass != nil }
-    @Published public var reExtractionProgress: (completed: Int, total: Int)?
+    @Published public private(set) var reExtractionProgress: (completed: Int, total: Int)?
     /// The Suggestion keyboard triage acts on (batched-extraction ticket
     /// 08), or `nil` when nothing is focused. Cleared whenever that
     /// Suggestion leaves the Inbox by any route.
@@ -203,14 +195,10 @@ public final class AppModel: ObservableObject {
     /// Keeps the Focus list in Reminders in line with the Focus Tier
     /// (ADR 0048), told each time the list is derived.
     private let focusList: FocusList
-    /// Re-extraction's own scope and cooldown: `reExtract()` and
-    /// `canReExtract` both read this instead of the old fixed "unbounded,
-    /// no cooldown" behavior.
-    private let reExtractionSettings: ReExtractionSettings
-    /// Messages Intake (CONTEXT.md), held here rather than behind the
-    /// Signal Board: every pass result is handed to `board.apply(messages:)`
-    /// (ADR 0020, amended 2026-09-26).
-    private let intake: MessagesIntake
+    /// Runs every Messages Intake pass and hands its result to the Board,
+    /// holding Intake beside the Board rather than behind it (ADR 0020,
+    /// intake-runner).
+    public let intakeRunner: IntakeRunner
     /// History (ADR 0029): handed straight to `MessagesIntake`, which
     /// threads it through to `Extraction.swift`'s writer, and to
     /// `historyActions` for Re-run. The Models tab's `ModelDownloading`
@@ -231,7 +219,7 @@ public final class AppModel: ObservableObject {
     /// Every action on a History Batch (ADR 0031, 0032, 0036), handed to
     /// History's view model.
     public private(set) lazy var historyActions = HistoryBatchActions(
-        app: self, board: board, intake: intake, historyStore: historyStore, signalStore: signalStore, corrections: corrections,
+        app: self, board: board, intakeRunner: intakeRunner, extraction: extraction, historyStore: historyStore, signalStore: signalStore, corrections: corrections,
         screeningSettings: screeningSettings
     )
     /// Screening (ADR 0036): the preferences, the Keychain-backed key, and
@@ -242,7 +230,6 @@ public final class AppModel: ObservableObject {
     /// (extraction-host). Settings view models take it directly.
     public let extraction: ExtractionHost
 
-    private var isReExtracting = false
     private var refreshCoordinator: RefreshCoordinator?
     /// Excluded from every `republish()` before dedup, tiering or the
     /// Later cap ever sees them. Neither the Signal Board nor AppModel
@@ -261,19 +248,22 @@ public final class AppModel: ObservableObject {
             contactsResolver: dependencies.contactsResolver, bundlePath: dependencies.bundlePath,
             participantLabelStore: dependencies.participantLabelStore, historyStore: dependencies.historyStore,
             correctionStore: dependencies.correctionStore,
-            batchWakeClock: dependencies.batchWakeClock, auditRoll: dependencies.auditRoll,
+            batchWakeAlarm: dependencies.batchWakeAlarm, auditRoll: dependencies.auditRoll,
             ignoresFilteredSMS: { filteredSMSSettings.ignoresFilteredSMS }
         )
-        self.intake = intake
-        self.board = SignalBoard(taskSource: dependencies.taskSource, signalStore: dependencies.signalStore, now: dependencies.now)
+        let snoozes = Snoozes(store: dependencies.signalStore, alarm: dependencies.snoozeWakeAlarm, now: dependencies.now)
+        self.snoozes = snoozes
+        self.board = SignalBoard(
+            taskSource: dependencies.taskSource, signalStore: dependencies.signalStore, now: dependencies.now, snoozes: snoozes
+        )
         self.focusList = FocusList(
-            taskSource: dependencies.taskSource, store: dependencies.signalStore, board: board,
+            taskSource: dependencies.taskSource, store: dependencies.signalStore, board: board, snoozes: snoozes,
             preference: dependencies.focusListPreference
         )
         self.isFocusListEnabled = dependencies.focusListPreference.isEnabled
         self.verbs = SignalVerbs(
-            board: board, taskSource: dependencies.taskSource, signalStore: dependencies.signalStore,
-            undoClock: dependencies.undoClock, undoWindow: dependencies.undoWindow, now: dependencies.now
+            board: board, snoozes: snoozes, taskSource: dependencies.taskSource, signalStore: dependencies.signalStore,
+            undoAlarm: dependencies.undoAlarm, undoWindow: dependencies.undoWindow, now: dependencies.now
         )
         self.settingsOpener = dependencies.settingsOpener
         self.refreshClock = dependencies.refreshClock
@@ -285,7 +275,6 @@ public final class AppModel: ObservableObject {
         self.isZenFocusModeEnabled = dependencies.zenFocusModePreference.isEnabled
         self.captureHotkeyPreference = dependencies.captureHotkeyPreference
         self.captureHotkeyPreset = dependencies.captureHotkeyPreference.selected
-        self.reExtractionSettings = dependencies.reExtractionSettings
         self.historyStore = dependencies.historyStore
         self.signalStore = dependencies.signalStore
         let corrections = Corrections(store: dependencies.correctionStore)
@@ -297,21 +286,28 @@ public final class AppModel: ObservableObject {
             screeningSettings: dependencies.screeningSettings, apiKeyStore: dependencies.apiKeyStore,
             makeScreener: dependencies.makeScreener
         )
+        self.intakeRunner = IntakeRunner(
+            intake: intake, board: board, extraction: extraction, reExtractionSettings: dependencies.reExtractionSettings,
+            now: dependencies.now
+        )
         self.now = dependencies.now
         self.rankedAt = dependencies.now()
         self.presentation = .loading(at: dependencies.now())
-        self.snoozeWakeClock = dependencies.snoozeWakeClock
 
         // Wired last, once every stored property above has a value:
         // `self` only becomes a valid `[weak self]` capture at that point.
         // A Batch left open by a pass wakes a Messages refresh through the
         // same path every other trigger takes (batched-extraction ticket 05).
-        intake.onPassChange = { [weak self] kind in
-            guard let self else { return }
-            self.runningMessagesPass = kind
-            // A pass writes History rows as it goes; History shows them once
-            // it ends.
-            if kind == nil { self.historyActions.changed() }
+        intakeRunner.onChange = { [weak self] in
+            self?.mirrorIntakeRunner()
+        }
+        intakeRunner.onResultApplied = { [weak self] in
+            self?.republish()
+        }
+        // A pass writes History rows as it goes; History shows them once it
+        // ends.
+        intakeRunner.onPassEnded = { [weak self] in
+            self?.historyActions.changed()
         }
         intake.onBatchDue = { [weak self] in
             Task { await self?.handleRefresh(.batchDue) }
@@ -328,16 +324,15 @@ public final class AppModel: ObservableObject {
         self.focusList.onChange = { [weak self] in
             self?.republish()
         }
+        self.snoozes.onWake = { [weak self] in
+            self?.republish()
+        }
         self.extraction.onChange = { [weak self] in
             guard let self else { return }
             if self.extraction.isUnavailable != self.extractionUnavailable {
                 self.extractionUnavailable = self.extraction.isUnavailable
             }
             self.historyActions.changed()
-        }
-        self.extraction.isPassRunning = { [weak self] in
-            guard let self else { return false }
-            return self.runningMessagesPass != nil || self.isReExtracting
         }
     }
 
@@ -365,23 +360,15 @@ public final class AppModel: ObservableObject {
         if offers != notForMeOffers { notForMeOffers = offers }
     }
 
-    /// "This was work"'s pass: the one Batch, straight to the model.
-    func extractNow(sourceRef: String) async {
-        applyMessages(await intake.extractNow(sourceRef: sourceRef))
-    }
-
-    private func applyMessages(_ result: MessagesIntake.Result) {
-        applyPass(result)
-        republish()
-    }
-
-    /// A pass's result onto the Board. A pass that read Messages found out
-    /// for itself, so a launch-time identity mismatch no longer decides
-    /// anything.
-    private func applyPass(_ result: MessagesIntake.Result) {
-        board.apply(messages: result)
-        if case .notRead = result { return }
-        messagesIdentityMismatch = false
+    /// Copies the runner's state into what SwiftUI watches. A progress
+    /// tick redraws the screen it drives, not the whole list.
+    private func mirrorIntakeRunner() {
+        if runningMessagesPass != intakeRunner.runningPass { runningMessagesPass = intakeRunner.runningPass }
+        if backfillProgress?.completed != intakeRunner.backfillProgress?.completed
+            || backfillProgress?.total != intakeRunner.backfillProgress?.total {
+            backfillProgress = intakeRunner.backfillProgress
+        }
+        reExtractionProgress = intakeRunner.reExtractionProgress
     }
 
     /// Fires once during `start()`, as soon as Reminders and every stored
@@ -406,7 +393,7 @@ public final class AppModel: ObservableObject {
         // first read attempt. `reloadMessages()` still runs its own
         // availability() probe right after and is the authoritative
         // source of truth once it does; see `MessagesIntake.identityMismatch`.
-        messagesIdentityMismatch = intake.identityMismatch()
+        intakeRunner.checkIdentityAtLaunch()
         setUpRefreshCoordinator()
         extraction.applyScreeningSettings()
         _ = try? await taskSource.requestAccess()
@@ -494,14 +481,7 @@ public final class AppModel: ObservableObject {
     /// attention. Contrast `reExtract()`, the one path a user explicitly
     /// waits on a progress readout for.
     public func reloadMessages() async {
-        let result = await intake.refresh(now: Date(), priority: .background) { [weak self] completed, total in
-            Task { @MainActor in
-                self?.backfillProgress = (completed, total)
-            }
-        }
-        applyPass(result)
-        backfillProgress = nil
-        republish()
+        await intakeRunner.refresh()
     }
 
     public func openFullDiskAccessSettings() {
@@ -512,59 +492,16 @@ public final class AppModel: ObservableObject {
         settingsOpener.open(.reminders)
     }
 
-    /// ticket 12's manual re-extraction: never called automatically, only
-    /// from a user-initiated action (ADR 0004, unchanged). `canReExtract`
-    /// is the UI-facing enablement rule the toolbar checks before ever
-    /// calling this; `isReExtracting` is this function's own narrower
-    /// re-entrancy guard, checked independently in case something calls it
-    /// anyway. `reExtractionSettings.lastRunAt` is recorded the moment this
-    /// starts, not when it finishes — a slow run shouldn't leave the
-    /// cooldown reading as if no run had started at all. `.utility`
-    /// (extraction QoS): unlike `reloadMessages()`'s automated triggers,
-    /// this only ever runs from an explicit click the toolbar shows a
-    /// progress readout for — lower than the default so it still yields to
-    /// the UI, but not deprioritized behind background work the way an
-    /// automated pass is.
+    /// Ticket 12's manual re-extraction, only ever from a click (ADR 0004).
     public func reExtract() async {
-        guard !isReExtracting else { return }
-        isReExtracting = true
-        defer { isReExtracting = false }
-        reExtractionSettings.lastRunAt = Date()
-
-        let result = await intake.reExtract(
-            now: Date(), lookbackDays: reExtractionSettings.lookbackDays, priority: .utility
-        ) { [weak self] completed, total in
-            Task { @MainActor in
-                self?.reExtractionProgress = (completed, total)
-            }
-        }
-        applyPass(result)
-        reExtractionProgress = nil
-        republish()
+        await intakeRunner.reExtract()
     }
 
-    /// The UI-facing enablement rule for the manual re-extraction control,
-    /// read only by the File menu's `validateMenuItem` (main.swift) —
-    /// pulled out into one property here so the rule reads in one place
-    /// instead of only inside AppKit plumbing. `reExtractionAllowed` is the
-    /// one condition here that depends on the wall clock rather than
-    /// `AppModel`'s own `@Published` state, kept as a separately-testable
-    /// pure function for the same reason `Ranking.rank(_:now:)` takes `now`
-    /// as a parameter instead of minting it internally.
-    ///
-    /// `isMessagesPassRunning` is here because ADR 0034 made a click during
-    /// a running pass wait for that pass rather than no-op, and ADR 0035
-    /// stopped `isLoading` from covering the launch pass. Without it the
-    /// control reads as enabled and then appears to do nothing for however
-    /// long the pass takes, which is the failure the disable is for.
+    /// The File menu's Re-run Extraction item enabled: the runner's rule,
+    /// plus the launch's loading state, which also covers the Reminders
+    /// read.
     public var canReExtract: Bool {
-        reExtractionProgress == nil && !isLoading && backfillProgress == nil
-            && !isMessagesPassRunning
-            && !messagesNeedFullDiskAccess && !extractionUnavailable
-            && reExtractionAllowed(
-                now: Date(), lastRunAt: reExtractionSettings.lastRunAt,
-                minimumIntervalHours: reExtractionSettings.minimumIntervalHours
-            )
+        !isLoading && intakeRunner.canReExtract
     }
 
     /// The File menu's Re-run Extraction item: its own name when it can
@@ -586,7 +523,7 @@ public final class AppModel: ObservableObject {
         rankedAt = now()
         let remindersOut = board.availability(of: .reminders) == .unavailable
         if remindersOut != remindersUnavailable { remindersUnavailable = remindersOut }
-        let messagesOut = messagesIdentityMismatch || board.availability(of: .messages) == .unavailable
+        let messagesOut = intakeRunner.messagesUnavailable
         if messagesOut != messagesNeedFullDiskAccess { messagesNeedFullDiskAccess = messagesOut }
         rankedList = board.rankedList(now: rankedAt, hiding: hidingIDs)
         checkedOff = board.checkedOff(now: rankedAt, hiding: hidingIDs)
@@ -599,7 +536,6 @@ public final class AppModel: ObservableObject {
         if let previewed = previewedSuggestionId, !presentation.isSuggested(previewed) {
             previewedSuggestionId = nil
         }
-        scheduleSnoozeWake()
         focusList.listDerived(at: rankedAt)
     }
 
@@ -628,27 +564,6 @@ public final class AppModel: ObservableObject {
     public func morningBriefText(format: MorningBriefFormat = .standard) -> String {
         let moment = now()
         return composeMorningBrief(board.rankedList(now: moment, hiding: hidingIDs), now: moment, format: format)
-    }
-
-    /// One wake-up, for the earliest snooze still running, replacing any
-    /// scheduled for a different moment. Firing derives the list again.
-    private func scheduleSnoozeWake() {
-        let earliest = rankedList.snoozed.first?.snoozedUntil
-        guard earliest != snoozeWake?.at else { return }
-        snoozeWakeToken += 1
-        guard let earliest else {
-            snoozeWake = nil
-            return
-        }
-        let token = snoozeWakeToken
-        snoozeWake = (earliest, token)
-        snoozeWakeClock.scheduleOnce(after: max(earliest.timeIntervalSince(rankedAt), 0)) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.snoozeWake?.token == token else { return }
-                self.snoozeWake = nil
-                self.republish()
-            }
-        }
     }
 
     /// Builds `presentation` from the list and the flags it reads. Called

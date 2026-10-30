@@ -13,7 +13,7 @@ private func makeViewModel(
     let preference = MorningBriefPreference(defaults: morningBriefDefaults(suite))
     let delivery = MorningBriefDelivery(
         preference: preference, sender: sender, recipient: { selfThread.number }, compose: { morningBriefHeader },
-        now: { time }, clock: FakeUndoClock()
+        now: { time }, alarm: FakeAlarm()
     )
     let list = RankedList(
         focus: ["A", "B", "C", "D"].map {

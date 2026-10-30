@@ -154,7 +154,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
             } + [ReminderTask(id: "f1", title: "Pay rent", dueAt: nil, priority: .high, createdAt: now)]
             let store = makeTestSignalStore()
             let board = await MainActor.run {
-                SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store)
+                SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store, snoozes: Snoozes(store: store))
             }
             await board.refreshReminders()
             try store.snooze(signalId: "r0", until: now.addingTimeInterval(86400))
@@ -173,7 +173,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
             let tasks = ["Pay rent", "Call the dentist", "Send Q3 numbers"].enumerated().map {
                 ReminderTask(id: "r\($0.offset)", title: $0.element, dueAt: nil, priority: .high, createdAt: now)
             }
-            let board = await MainActor.run { SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store) }
+            let board = await MainActor.run { SignalBoard(taskSource: FakeTaskSource(tasks: tasks), signalStore: store, snoozes: Snoozes(store: store)) }
             await board.refreshReminders()
             try store.setFocusOrders(["r2": 0, "r0": 1, "r1": 2])
             let text = await MainActor.run { composeMorningBrief(board.rankedList(now: now), now: now) }
@@ -204,7 +204,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     d.apiKeyStore = FakeAPIKeyStore()
                     d.now = { clock.date }
                     d.bundlePath = "/nonexistent"
-                    d.snoozeWakeClock = FakeUndoClock()
+                    d.snoozeWakeAlarm = FakeAlarm()
                 })
             }
             try store.snooze(signalId: "r1", until: now)
@@ -239,7 +239,7 @@ func registerMorningBriefTests(_ runner: TestRunner) {
                     d.correctionStore = FakeCorrectionStore()
                     d.apiKeyStore = FakeAPIKeyStore()
                     d.bundlePath = "/nonexistent"
-                    d.snoozeWakeClock = FakeUndoClock()
+                    d.snoozeWakeAlarm = FakeAlarm()
                 })
             }
             let seen = await MainActor.run { () -> Box in

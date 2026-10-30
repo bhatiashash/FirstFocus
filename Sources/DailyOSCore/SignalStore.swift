@@ -356,6 +356,11 @@ public protocol SnoozeStore: Sendable {
 
     /// Ends `signalId`'s snooze, if it has one.
     func unsnooze(signalId: String) throws
+
+    /// The earliest snooze end later than `moment`, `nil` with none: when
+    /// the snooze wake-up is next due (snooze-wake). A snooze kept for a
+    /// reminder deleted elsewhere can count, which costs one spare wake.
+    func earliestSnoozeEnd(after moment: Date) -> Date?
 }
 
 public extension SnoozeStore {
