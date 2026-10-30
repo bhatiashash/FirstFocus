@@ -244,7 +244,8 @@ app.mainMenu = makeMainMenu()
 let dependencies = AppDependencies.live(
     settingsOpener: NSWorkspaceSettingsOpener(),
     foregroundObserver: NSApplicationForegroundObserver(),
-    messagesChanges: FSEventsMessagesChangeObserver(directory: liveMessagesDirectory)
+    messagesChanges: FSEventsMessagesChangeObserver(directory: liveMessagesDirectory),
+    morningBriefSender: MessagesAppSender()
 )
 let extractionSettings = dependencies.extractionSettings
 let reExtractionSettings = dependencies.reExtractionSettings
@@ -284,30 +285,14 @@ let screeningViewModel = ScreeningSettingsViewModel(
     settings: screeningSettings, keyStore: apiKeyStore, extraction: model.extraction, historyStore: historyStore,
     correctionLog: dependencies.correctionStore
 )
-// Morning Brief (ADR 0046): one preference and one delivery, shared by
-// Advanced's section and the daily send.
-let morningBriefPreference = MorningBriefPreference()
-// The Brief only ever goes to you: your Self-thread, the conversation
-// Messages has with one of your own addresses.
-let selfThread = ChatDBMessagesSource(path: liveChatDBPath)
-let morningBriefDelivery = MorningBriefDelivery(
-    preference: morningBriefPreference, sender: MessagesAppSender(), recipient: { selfThread.selfThreadAddress() },
-    compose: { model.morningBriefText(format: morningBriefPreference.format) },
-    alarm: dependencies.morningBriefAlarm
-)
-let morningBriefViewModel = MorningBriefViewModel(
-    delivery: morningBriefDelivery, preference: morningBriefPreference,
-    myNumber: { selfThread.selfThreadAddress() },
-    preview: { model.morningBriefText(format: $0) }
-)
-// The daily send: once the stored list has loaded, a missed Brief goes
-// out, then the 8:00 timer is set. Wake from sleep is the other moment a
-// missed one can go out.
-model.onStoredListReady = { Task { await morningBriefDelivery.start() } }
+// Morning Brief (ADR 0046): AppModel builds the delivery from `dependencies`
+// and sends a missed Brief at launch. Wake from sleep is the other moment
+// one can go out.
+let morningBriefViewModel = model.morningBriefViewModel
 NSWorkspace.shared.notificationCenter.addObserver(
     forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
 ) { _ in
-    Task { @MainActor in await morningBriefDelivery.systemDidWake() }
+    Task { @MainActor in await model.systemDidWake() }
 }
 let openAtLoginViewModel = OpenAtLoginViewModel(loginItem: MainAppLoginItem())
 let modelsViewModel = ModelsViewModel(

@@ -44,6 +44,13 @@ public struct AppDependencies {
     public var snoozeWakeAlarm: any Alarm
     /// The Morning Brief's daily send (ADR 0046).
     public var morningBriefAlarm: any Alarm
+    /// The Brief's stored settings and record.
+    public var morningBriefPreference: MorningBriefPreference
+    /// How the Brief is sent: Messages.app in the shipped app.
+    public var morningBriefSender: any MessageSender
+    /// Your own address in Messages, the only place the Brief goes: the
+    /// Self-thread. `nil` when there is none.
+    public var selfThreadAddress: @MainActor () -> String?
 
     public init(
         taskSource: any TaskSource, messagesSource: any MessagesSource, signalStore: any SignalStore,
@@ -57,7 +64,9 @@ public struct AppDependencies {
         correctionStore: any CorrectionStore, screeningSettings: ScreeningSettings, filteredSMSSettings: FilteredSMSSettings,
         apiKeyStore: any APIKeyStore, makeScreener: @escaping @Sendable (String) -> any Screener, ruleStore: any RuleStore,
         batchWakeAlarm: any Alarm, auditRoll: @escaping @Sendable () -> Double, now: @escaping @MainActor () -> Date,
-        bundlePath: String, snoozeWakeAlarm: any Alarm, morningBriefAlarm: any Alarm
+        bundlePath: String, snoozeWakeAlarm: any Alarm, morningBriefAlarm: any Alarm,
+        morningBriefPreference: MorningBriefPreference, morningBriefSender: any MessageSender,
+        selfThreadAddress: @escaping @MainActor () -> String?
     ) {
         self.taskSource = taskSource
         self.messagesSource = messagesSource
@@ -91,6 +100,9 @@ public struct AppDependencies {
         self.bundlePath = bundlePath
         self.snoozeWakeAlarm = snoozeWakeAlarm
         self.morningBriefAlarm = morningBriefAlarm
+        self.morningBriefPreference = morningBriefPreference
+        self.morningBriefSender = morningBriefSender
+        self.selfThreadAddress = selfThreadAddress
     }
 
     /// The shipped app: the real Sources, and every store at the bundle's
@@ -99,9 +111,12 @@ public struct AppDependencies {
     /// not import, so the executable passes them in.
     public static func live(
         settingsOpener: any SettingsOpener, foregroundObserver: any ForegroundObserver,
-        messagesChanges: any MessagesChangeObserver
+        messagesChanges: any MessagesChangeObserver, morningBriefSender: any MessageSender
     ) -> AppDependencies {
-        AppDependencies(
+        // The Brief only ever goes to you: your Self-thread, the
+        // conversation Messages has with one of your own addresses.
+        let selfThread = ChatDBMessagesSource(path: liveChatDBPath)
+        return AppDependencies(
             taskSource: EventKitTaskSource(),
             messagesSource: ChatDBMessagesSource(path: liveChatDBPath),
             signalStore: SQLiteSignalStore(path: SQLiteSignalStore.defaultPath(bundleIdentifier: bundleIdentifier)),
@@ -135,7 +150,10 @@ public struct AppDependencies {
             now: { Date() },
             bundlePath: Bundle.main.bundlePath,
             snoozeWakeAlarm: WallClockAlarm(),
-            morningBriefAlarm: WallClockAlarm()
+            morningBriefAlarm: WallClockAlarm(),
+            morningBriefPreference: MorningBriefPreference(),
+            morningBriefSender: morningBriefSender,
+            selfThreadAddress: { selfThread.selfThreadAddress() }
         )
     }
 }

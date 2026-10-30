@@ -128,6 +128,26 @@ public final class AppModel: ObservableObject {
         set { triage.previewedId = newValue }
     }
     public var collapsedSections: Set<CollapsibleSection> { triage.collapsed }
+    /// The Morning Brief's send (ADR 0046), shared by Advanced's section and
+    /// the daily send. It composes the Brief from the Ranked List as it is
+    /// at the moment of sending.
+    public private(set) lazy var morningBriefDelivery = MorningBriefDelivery(
+        preference: morningBriefPreference, sender: morningBriefSender, recipient: selfThreadAddress,
+        compose: { [weak self] in self?.morningBriefText(format: self?.morningBriefPreference.format ?? .standard) ?? "" },
+        now: now, alarm: morningBriefAlarm
+    )
+    /// Advanced's Morning Brief section.
+    public private(set) lazy var morningBriefViewModel = MorningBriefViewModel(
+        delivery: morningBriefDelivery, preference: morningBriefPreference, myNumber: selfThreadAddress,
+        preview: { [weak self] in self?.morningBriefText(format: $0) ?? "" }
+    )
+    private let morningBriefPreference: MorningBriefPreference
+    private let morningBriefSender: any MessageSender
+    private let selfThreadAddress: @MainActor () -> String?
+    private let morningBriefAlarm: any Alarm
+    /// The launch send, which runs beside the rest of launch.
+    private var morningBriefStart: Task<Void, Never>?
+
     /// Zen Focus Mode (ticket 06): backed by `ZenFocusModePreference`, a
     /// thin typed wrapper over a single `UserDefaults` flag — see its own
     /// doc comment for why it isn't just a bare `UserDefaults` call here.
@@ -300,6 +320,10 @@ public final class AppModel: ObservableObject {
             now: dependencies.now
         )
         self.now = dependencies.now
+        self.morningBriefPreference = dependencies.morningBriefPreference
+        self.morningBriefSender = dependencies.morningBriefSender
+        self.selfThreadAddress = dependencies.selfThreadAddress
+        self.morningBriefAlarm = dependencies.morningBriefAlarm
         self.rankedAt = dependencies.now()
         self.presentation = .loading(at: dependencies.now())
 
@@ -423,6 +447,9 @@ public final class AppModel: ObservableObject {
         board.loadStoredMessages()
         republish()
         onStoredListReady?()
+        // A Brief missed while the app was closed goes out now, then the
+        // timer is set. Beside the rest of launch, which can take minutes.
+        morningBriefStart = Task { await morningBriefDelivery.start() }
         if signalStore.isBackfillComplete() {
             isLoading = false
         }
@@ -542,6 +569,17 @@ public final class AppModel: ObservableObject {
         updateNotForMeOffers()
         triage.drop { [presentation] in !presentation.isSuggested($0) }
         focusList.listDerived(at: rankedAt)
+    }
+
+    /// Wake from sleep is the other moment a missed Brief can go out. The
+    /// executable calls this when macOS posts its wake notification.
+    public func systemDidWake() async {
+        await morningBriefDelivery.systemDidWake()
+    }
+
+    /// Waits for the launch send of the Morning Brief. For tests.
+    public func morningBriefSettled() async {
+        await morningBriefStart?.value
     }
 
     /// Waits for every Focus list sync asked for so far, and any each one

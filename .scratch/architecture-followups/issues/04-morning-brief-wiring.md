@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The executable builds the Brief through the dependency composition, with no copy in the test harness.
-- [ ] A test starts the model and checks the Brief is sent after a wake-up within its window, using the fake alarm.
-- [ ] The Brief's behaviour in the running app is unchanged.
+- [x] The executable builds the Brief through the dependency composition, with no copy in the test harness.
+- [x] A test starts the model and checks the Brief is sent after a wake-up within its window, using the fake alarm.
+- [x] The Brief's behaviour in the running app is unchanged.

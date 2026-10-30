@@ -43,7 +43,10 @@ extension AppDependencies {
             now: { Date() },
             bundlePath: "/nonexistent",
             snoozeWakeAlarm: FakeAlarm(),
-            morningBriefAlarm: FakeAlarm()
+            morningBriefAlarm: FakeAlarm(),
+            morningBriefPreference: MorningBriefPreference(defaults: defaults),
+            morningBriefSender: FakeMessageSender(),
+            selfThreadAddress: { nil }
         )
         configure(&dependencies)
         return dependencies
