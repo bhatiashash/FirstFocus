@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The key guard, popover and collapse cases are covered by InboxTriage tests and removed from the AppModel tests.
-- [ ] At least one AppModel test remains that checks a key press reaches Approve or Dismiss.
-- [ ] The number of cases covered does not shrink.
+- [x] The key guard, popover and collapse cases are covered by InboxTriage tests and removed from the AppModel tests.
+- [x] At least one AppModel test remains that checks a key press reaches Approve or Dismiss.
+- [x] The number of cases covered does not shrink.

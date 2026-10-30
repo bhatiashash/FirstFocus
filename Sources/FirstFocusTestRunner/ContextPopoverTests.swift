@@ -59,24 +59,6 @@ func registerContextPopoverTests(_ runner: TestRunner) {
     }
 
     runner.suite("AppModel: the Suggestion popover") { r in
-        r.run("Space toggles the popover for the focused Suggestion, and Escape closes it") {
-            let model = await makeModel(suggestions: [
-                suggestion("s1", label: "Grab bread", originalText: "grab bread", age: 10),
-                suggestion("s2", label: "Book flights", originalText: "book flights", age: 20),
-            ])
-            await model.start()
-            await model.handleInboxKey(.togglePreview)
-            try await MainActor.run { try expect(model.previewedSuggestionId == nil, "nothing is focused yet") }
-            await model.handleInboxKey(.down)
-            await model.handleInboxKey(.togglePreview)
-            try await MainActor.run { try expect(model.previewedSuggestionId == "s1") }
-            await model.handleInboxKey(.togglePreview)
-            try await MainActor.run { try expect(model.previewedSuggestionId == nil) }
-            await model.handleInboxKey(.togglePreview)
-            await model.handleInboxKey(.closePreview)
-            try await MainActor.run { try expect(model.previewedSuggestionId == nil) }
-        }
-
         r.run("an open popover follows focus to the next Suggestion") {
             let model = await makeModel(suggestions: [
                 suggestion("s1", label: "Grab bread", originalText: "grab bread", age: 10),
@@ -89,15 +71,6 @@ func registerContextPopoverTests(_ runner: TestRunner) {
             try await MainActor.run { try expect(model.previewedSuggestionId == "s2") }
             await model.handleInboxKey(.dismiss)
             try await MainActor.run { try expect(model.previewedSuggestionId == "s1", "after acting, it follows focus again") }
-        }
-
-        r.run("hovering can open and close the popover for any Suggestion") {
-            let model = await makeModel(suggestions: [suggestion("s1", label: "Grab bread", originalText: "grab bread", age: 10)])
-            await model.start()
-            await MainActor.run { model.showPreview(forSuggestionId: "s1") }
-            try await MainActor.run { try expect(model.previewedSuggestionId == "s1") }
-            await MainActor.run { model.hidePreview(forSuggestionId: "s1") }
-            try await MainActor.run { try expect(model.previewedSuggestionId == nil) }
         }
     }
 }

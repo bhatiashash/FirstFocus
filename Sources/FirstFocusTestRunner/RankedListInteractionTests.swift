@@ -266,34 +266,6 @@ func registerRankedListInteractionTests(_ runner: TestRunner) {
     }
 
     runner.suite("AppModel: Inbox keys answer at once") { r in
-        r.run("Return, Delete and Space with nothing focused are ignored") {
-            let h = await makeHarness(messageSignals: [suggestion(id: "s1")])
-            await h.model.start()
-            try await MainActor.run {
-                try expect(h.model.pressInboxKey(.approve) == false)
-                try expect(h.model.pressInboxKey(.dismiss) == false)
-                try expect(h.model.pressInboxKey(.togglePreview) == false)
-            }
-            await settle()
-            try expect(h.taskSource.tasks.isEmpty)
-            try expect(h.store.openSignals().count == 1)
-        }
-
-        r.run("Escape with no popover open is ignored") {
-            let h = await makeHarness(messageSignals: [suggestion(id: "s1")])
-            await h.model.start()
-            try await MainActor.run { try expect(h.model.pressInboxKey(.closePreview) == false) }
-        }
-
-        r.run("every key is ignored with an empty Inbox") {
-            let h = await makeHarness(tasks: [task(id: "f1", priority: .high)])
-            await h.model.start()
-            try await MainActor.run {
-                try expect(h.model.pressInboxKey(.down) == false)
-                try expect(h.model.pressInboxKey(.up) == false)
-            }
-        }
-
         r.run("every key is ignored in Zen Focus Mode, which hides the Inbox") {
             let h = await makeHarness(messageSignals: [suggestion(id: "s1")], zen: true)
             await h.model.start()

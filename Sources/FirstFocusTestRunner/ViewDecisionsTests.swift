@@ -80,33 +80,14 @@ func registerViewDecisionsTests(_ runner: TestRunner) {
     }
 
     runner.suite("Sections: collapsing") { r in
-        r.run("the Snoozed Section starts collapsed, the Inbox and Later expanded") {
-            let (model, _) = await MainActor.run { makeModel() }
-            try await MainActor.run {
-                try expect(model.isCollapsed(.snoozed))
-                try expect(!model.isCollapsed(.inbox) && !model.isCollapsed(.later))
-            }
-        }
-
-        r.run("a collapsed Inbox takes no keys and drops its focus and preview") {
+        r.run("a collapsed Inbox passes keys through, and expanding it takes them again") {
             let (model, _) = await MainActor.run { makeModel(suggestions: ["Call the dentist", "Book flights"]) }
             await model.start()
-            try await MainActor.run {
-                try expect(model.pressInboxKey(.down))
-            }
             await model.handleInboxKey(.down)
             try await MainActor.run {
-                try expect(model.focusedSuggestionId != nil)
                 model.toggleCollapse(.inbox)
-                try expect(model.focusedSuggestionId == nil && model.previewedSuggestionId == nil)
-                for key: AppModel.InboxKey in [.up, .down, .approve, .dismiss, .togglePreview] {
-                    try expect(!model.pressInboxKey(key), "\(key) passes through while collapsed")
-                }
-            }
-            await model.handleInboxKey(.down)
-            try await MainActor.run {
-                try expect(model.focusedSuggestionId == nil)
-                try expect(model.rankedList.suggested.count == 2, "nothing was approved or dismissed")
+                try expect(!model.pressInboxKey(.down), "passes through while collapsed")
+                try expect(model.focusedSuggestionId == nil, "and focus was dropped")
                 model.toggleCollapse(.inbox)
                 try expect(model.pressInboxKey(.down), "expanded again, it takes keys")
             }
